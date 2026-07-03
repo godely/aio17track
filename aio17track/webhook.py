@@ -5,13 +5,17 @@ parse/re-serialize — re-dumping shifts key order or whitespace and breaks
 the hash.
 """
 
+import hashlib
+import hmac
+import json
 from dataclasses import dataclass
-from enum import StrEnum
 
+from .enums import _StrEnumWithUnknown
+from .errors import SignatureError, Track17APIError
 from .models import StoppedNotice, TrackInfo
 
 
-class WebhookEventType(StrEnum):
+class WebhookEventType(_StrEnumWithUnknown):
     """Kind of webhook event pushed by 17track."""
 
     UNKNOWN = "UNKNOWN"
@@ -28,19 +32,53 @@ class WebhookEvent:
 
 
 def verify_signature(raw_body: bytes, sign_header: str, api_key: str) -> bool:
-    """Verify a webhook signature over the raw request bytes.
+    """Verify the ``sign`` header over the raw request bytes.
 
-    signed string = raw_body_text + "/" + api_key;
-    expected = sha256(signed_string).hexdigest();
-    compared against ``sign_header`` with ``hmac.compare_digest``
-    (constant-time). Signature failure raises ``SignatureError``.
+    The signed string is ``<raw body>/<api key>``, hashed with SHA-256 and
+    hex-encoded, compared in constant time. Returns True on a match; a
+    mismatch raises ``SignatureError`` (SPEC §9).
+
+    Hash the bytes exactly as received — parsing and re-serializing the
+    JSON shifts key order or whitespace and breaks the hash.
     """
-    raise NotImplementedError
+    signed = raw_body + b"/" + api_key.encode("utf-8")
+    expected = hashlib.sha256(signed).hexdigest()
+    if not hmac.compare_digest(expected, sign_header):
+        raise SignatureError("webhook signature mismatch")
+    return True
 
 
 def parse_event(raw_body: bytes) -> WebhookEvent:
     """Parse a webhook body into a ``WebhookEvent``.
 
-    Malformed body raises ``Track17APIError``.
+    ``TRACKING_UPDATED`` data parses as ``TrackInfo`` (same shape as a
+    gettrackinfo accepted item); ``TRACKING_STOPPED`` as ``StoppedNotice``.
+    A malformed body — invalid JSON, missing ``data``, missing required
+    fields, or an event type we cannot shape-map — raises
+    ``Track17APIError``.
     """
-    raise NotImplementedError
+    try:
+        payload = json.loads(raw_body)
+    except ValueError as exc:  # includes UnicodeDecodeError / JSONDecodeError
+        raise Track17APIError(-1, "webhook body is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise Track17APIError(-1, "webhook body is not a JSON object")
+
+    event_raw = payload.get("event")
+    event = WebhookEventType(event_raw) if isinstance(event_raw, str) else WebhookEventType.UNKNOWN
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        raise Track17APIError(-1, "webhook body has no 'data' object")
+
+    try:
+        if event is WebhookEventType.TRACKING_UPDATED:
+            return WebhookEvent(event=event, data=TrackInfo.from_api(data))
+        if event is WebhookEventType.TRACKING_STOPPED:
+            return WebhookEvent(event=event, data=StoppedNotice.from_api(data))
+    except KeyError as exc:
+        raise Track17APIError(
+            -1, f"webhook data is missing required field {exc.args[0]!r}"
+        ) from exc
+    # The enum lookup never raises (forward-compat rule); an event we do not
+    # know still fails here because its data shape is unknowable.
+    raise Track17APIError(-1, f"unrecognized webhook event {payload.get('event')!r}")
