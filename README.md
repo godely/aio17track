@@ -93,8 +93,9 @@ fresh = await client.get_realtime_track_info(
 ## CLI
 
 Everything above is also drivable with no code, via `aio17track` (or
-`python -m aio17track`). The key comes from `--key` or
-`$SEVENTEENTRACK_KEY`:
+`python -m aio17track`). The key comes from `--key`, else
+`$SEVENTEENTRACK_KEY`, else `$SEVENTEENTRACK_LIVE_KEY` (so a key exported
+for the live suite works here too):
 
 ```sh
 export SEVENTEENTRACK_KEY="your-17token"

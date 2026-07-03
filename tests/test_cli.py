@@ -202,6 +202,17 @@ def test_carriers_unknown_code_exits_1(capsys: pytest.CaptureFixture[str]) -> No
     assert "no carrier" in capsys.readouterr().err
 
 
+def test_carriers_without_flags_is_a_usage_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Refuses to dump the full multi-thousand-row catalog; no fetch happens."""
+    with aioresponses() as mocked:
+        exit_code = main(["carriers"])
+        assert not mocked.requests  # rejected before any network
+    assert exit_code == 2
+    assert "--search" in capsys.readouterr().err
+
+
 # --- webhook ---
 
 

@@ -53,7 +53,8 @@ def _resolve_key(args: argparse.Namespace) -> str:
         if key:
             return key
     raise _UsageError(
-        "no API key: pass --key or set SEVENTEENTRACK_KEY in the environment"
+        "no API key: pass --key or set SEVENTEENTRACK_KEY (or "
+        "SEVENTEENTRACK_LIVE_KEY) in the environment"
     )
 
 
@@ -235,6 +236,9 @@ async def _cmd_change_info(args: argparse.Namespace) -> int:
 
 
 async def _cmd_carriers(args: argparse.Namespace) -> int:
+    if args.search is None and args.code is None and args.name is None:
+        # Refuse to dump the multi-thousand-row catalog by accident.
+        raise _UsageError("carriers requires one of --search, --code, or --name")
     catalog = CarrierCatalog(cache_path=args.cache)
     async with aiohttp.ClientSession() as session:
         await catalog.load(session)
@@ -297,7 +301,10 @@ async def _cmd_webhook_parse(args: argparse.Namespace) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--key", help="17token API key (default: $SEVENTEENTRACK_KEY)")
+    common.add_argument(
+        "--key",
+        help="17token API key (default: $SEVENTEENTRACK_KEY, then $SEVENTEENTRACK_LIVE_KEY)",
+    )
     common.add_argument("--json", action="store_true", help="emit JSON output")
 
     parser = argparse.ArgumentParser(
@@ -376,7 +383,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--carrier", type=int)
 
     sub = command("carriers", _cmd_carriers, "search the carrier catalog")
-    sub.add_argument("--search", default="", help="substring match on carrier names")
+    sub.add_argument("--search", help="substring match on carrier names")
     sub.add_argument("--code", type=int, help="look up the name for a carrier code")
     sub.add_argument("--name", help="look up the code for a carrier name")
     sub.add_argument("--cache", type=Path, help="on-disk cache path for the carrier list")
