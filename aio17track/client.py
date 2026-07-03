@@ -197,7 +197,10 @@ class Track17Client:
         return TrackListPage.from_api(envelope)
 
     async def get_quota(self) -> Quota:
-        data = await self._transport.request("getquota", None)
+        # No parameters, but send an explicit empty JSON body so this POST
+        # carries the same content type as every other endpoint (json=None
+        # would send no body at all).
+        data = await self._transport.request("getquota", [])
         return Quota.from_api(data)
 
     # --- metered, guarded ---
