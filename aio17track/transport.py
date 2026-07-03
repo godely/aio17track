@@ -18,6 +18,7 @@ from typing import Any, NoReturn
 
 import aiohttp
 
+from ._constants import EPSILON, MIN_SLEEP_SECONDS
 from .errors import (
     AuthenticationError,
     QuotaExhaustedError,
@@ -65,14 +66,10 @@ class _TokenBucket:
                     self._capacity, self._tokens + (now - self._updated) * self._rate
                 )
                 self._updated = now
-                # The epsilon absorbs float refill error (e.g. 1/3 s * 3/s
-                # rounds to 0.999...); without it the residual sleep is
-                # smaller than the clock's ulp and acquire() spins forever.
-                if self._tokens >= 1.0 - 1e-9:
+                if self._tokens >= 1.0 - EPSILON:
                     self._tokens = max(0.0, self._tokens - 1.0)
                     return
-                # Floor the wait so every iteration makes clock progress.
-                await self._sleep(max((1.0 - self._tokens) / self._rate, 1e-6))
+                await self._sleep(max((1.0 - self._tokens) / self._rate, MIN_SLEEP_SECONDS))
 
 
 def _parse_retry_after(header: str | None) -> float | None:
