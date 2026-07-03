@@ -111,6 +111,8 @@ class Track17Client:
         Chunks go through the transport throttle sequentially; accepted and
         rejected items are concatenated across chunks in dispatch order.
         """
+        if chunk_size < 1:
+            raise ValueError(f"chunk_size must be >= 1, got {chunk_size}")
         accepted: list[R] = []
         rejected: list[RejectedItem] = []
         for chunk in _chunk(payloads, chunk_size):

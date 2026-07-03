@@ -80,6 +80,19 @@ async def test_unknown_cache_level_is_rejected() -> None:
             assert not mocked.requests
 
 
+async def test_batched_rejects_non_positive_chunk_size() -> None:
+    """The internal chunk_size knob fails loudly on nonsense values instead
+    of a cryptic range() error (0) or silently yielding no chunks (<0)."""
+    from aio17track.models import TrackInfo
+
+    async with Track17Client("test-key") as client:
+        for bad_size in (0, -1):
+            with pytest.raises(ValueError, match="chunk_size"):
+                await client._batched(
+                    "gettrackinfo", [{"number": "X"}], TrackInfo.from_api, chunk_size=bad_size
+                )
+
+
 async def test_realtime_parses_full_track_info(load_fixture: FixtureLoader) -> None:
     async with Track17Client("test-key") as client:
         with aioresponses() as mocked:
