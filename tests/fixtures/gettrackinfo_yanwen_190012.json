@@ -1,0 +1,183 @@
+{
+  "code": 0,
+  "data": {
+    "accepted": [
+      {
+        "number": "YT2616912345678901",
+        "carrier": 190012,
+        "param": null,
+        "tag": null,
+        "lang": null,
+        "destination_postal_code": null,
+        "origin_country": null,
+        "destination_country": null,
+        "destination_city": null,
+        "ship_date": null,
+        "shipper": null,
+        "consignee": null,
+        "phone_number_last_4": null,
+        "phone_number": null,
+        "cpf_or_cnpj": null,
+        "special_tracking_info": null,
+        "track_info": {
+          "shipping_info": {
+            "shipper_address": {
+              "country": "CN",
+              "state": null,
+              "city": null,
+              "street": null,
+              "postal_code": null,
+              "coordinates": { "longitude": null, "latitude": null }
+            },
+            "recipient_address": {
+              "country": "US",
+              "state": null,
+              "city": null,
+              "street": null,
+              "postal_code": null,
+              "coordinates": { "longitude": null, "latitude": null }
+            }
+          },
+          "latest_status": {
+            "status": "InTransit",
+            "sub_status": "InTransit_Arrival",
+            "sub_status_descr": null
+          },
+          "latest_event": {
+            "time_iso": "2026-06-29T21:05:00+08:00",
+            "time_utc": "2026-06-29T13:05:00Z",
+            "time_raw": { "date": "2026-06-29", "time": "21:05:00", "timezone": "+08:00" },
+            "description": "Arrived at destination country port",
+            "description_translation": { "lang": "en", "description": "Arrived at destination country port" },
+            "location": "LOS ANGELES, US",
+            "stage": "Arrival",
+            "sub_status": "InTransit_Arrival",
+            "address": {
+              "country": "US",
+              "state": "CA",
+              "city": "LOS ANGELES",
+              "street": null,
+              "postal_code": null,
+              "coordinates": { "longitude": "-118.2437", "latitude": "34.0522" }
+            }
+          },
+          "time_metrics": {
+            "days_after_order": 9,
+            "days_of_transit": 8,
+            "days_of_transit_done": 0,
+            "days_after_last_update": 1,
+            "estimated_delivery_date": { "source": "17TRACK", "from": "2026-07-08T00:00:00-07:00", "to": "2026-07-12T00:00:00-07:00" }
+          },
+          "milestone": [
+            {
+              "key_stage": "PickedUp",
+              "time_iso": "2026-06-24T09:00:00+08:00",
+              "time_utc": "2026-06-24T01:00:00Z",
+              "time_raw": { "date": "2026-06-24", "time": "09:00:00", "timezone": "+08:00" }
+            }
+          ],
+          "misc_info": {
+            "risk_factor": 0,
+            "service_type": null,
+            "weight_raw": null,
+            "weight_kg": null,
+            "pieces": null,
+            "dimensions": null,
+            "customer_number": null,
+            "reference_number": null,
+            "local_number": "YT2616912345678901",
+            "local_provider": "Yanwen",
+            "local_key": 190012
+          },
+          "tracking": {
+            "providers_hash": 202660211,
+            "providers": [
+              {
+                "provider": {
+                  "key": 190012,
+                  "name": "Yanwen",
+                  "alias": "YANWEN",
+                  "tel": null,
+                  "homepage": "http://www.yw56.com.cn/",
+                  "country": "CN"
+                },
+                "service_type": null,
+                "latest_sync_status": "Success",
+                "latest_sync_time": "2026-06-30T02:11:45Z",
+                "provider_lang": null,
+                "provider_tips": null,
+                "events_hash": 91228817,
+                "events": [
+                  {
+                    "time_iso": "2026-06-29T21:05:00+08:00",
+                    "time_utc": "2026-06-29T13:05:00Z",
+                    "time_raw": { "date": "2026-06-29", "time": "21:05:00", "timezone": "+08:00" },
+                    "description": "Arrived at destination country port",
+                    "description_translation": { "lang": "en", "description": "Arrived at destination country port" },
+                    "location": "LOS ANGELES, US",
+                    "stage": "Arrival",
+                    "sub_status": "InTransit_Arrival",
+                    "address": {
+                      "country": "US",
+                      "state": "CA",
+                      "city": "LOS ANGELES",
+                      "street": null,
+                      "postal_code": null,
+                      "coordinates": { "longitude": "-118.2437", "latitude": "34.0522" }
+                    }
+                  },
+                  {
+                    "time_iso": "2026-06-26T16:30:00+08:00",
+                    "time_utc": "2026-06-26T08:30:00Z",
+                    "time_raw": { "date": "2026-06-26", "time": "16:30:00", "timezone": "+08:00" },
+                    "description": "Hypothetical status introduced in a future API version",
+                    "description_translation": null,
+                    "location": "SHENZHEN, CN",
+                    "stage": "Departure",
+                    "sub_status": "InTransit_QuantumTunnelling",
+                    "address": {
+                      "country": "CN",
+                      "state": "GD",
+                      "city": "SHENZHEN",
+                      "street": null,
+                      "postal_code": null,
+                      "coordinates": { "longitude": null, "latitude": null }
+                    }
+                  },
+                  {
+                    "time_iso": "2026-06-24T09:00:00+08:00",
+                    "time_utc": "2026-06-24T01:00:00Z",
+                    "time_raw": { "date": "2026-06-24", "time": "09:00:00", "timezone": "+08:00" },
+                    "description": "Picked up",
+                    "description_translation": { "lang": "en", "description": "Picked up" },
+                    "location": "SHENZHEN, CN",
+                    "stage": "PickedUp",
+                    "sub_status": "InTransit_PickedUp",
+                    "address": {
+                      "country": "CN",
+                      "state": "GD",
+                      "city": "SHENZHEN",
+                      "street": null,
+                      "postal_code": null,
+                      "coordinates": { "longitude": null, "latitude": null }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "rejected": [
+      {
+        "carrier": "3011",
+        "number": "21213123123230",
+        "error": {
+          "code": -18019902,
+          "message": "The tracking number '21213123123230' does not register, please register first."
+        }
+      }
+    ]
+  }
+}

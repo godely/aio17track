@@ -1,0 +1,25 @@
+{
+  "code": 0,
+  "data": {
+    "accepted": [
+      {
+        "origin": 2,
+        "number": "AA123456789BR",
+        "carrier": 2151,
+        "email": null,
+        "lang": null,
+        "tag": "order-1042"
+      }
+    ],
+    "rejected": [
+      {
+        "number": "1234",
+        "carrier": 0,
+        "error": {
+          "code": -18010012,
+          "message": "The format of '1234' is invalid."
+        }
+      }
+    ]
+  }
+}

@@ -30,6 +30,11 @@ class _Transport:
 
         Returns ``data`` when ``code == 0``; raises the mapped exception
         (SPEC §7) when ``code != 0`` at the request level.
+
+        TODO(M2): ``gettracklist`` responses carry a top-level ``page``
+        object as a *sibling* of ``data``; the list path must preserve the
+        full envelope (``TrackListPage.from_api`` requires it) instead of
+        going through this data-only unwrap.
         """
         raise NotImplementedError
 
