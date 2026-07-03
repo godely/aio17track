@@ -6,7 +6,8 @@ through the transport throttle and merging every chunk's accepted/rejected
 items into a single ``BatchResult``.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any
 
 import aiohttp
 
@@ -18,10 +19,28 @@ from .models import (
     NumberCarrier,
     Quota,
     RegisteredNumber,
+    RejectedItem,
     TrackInfo,
     TrackListPage,
     TrackRegistration,
 )
+from .transport import _Transport
+
+_BATCH_LIMIT = 40  # mutation/read-by-number endpoints (SPEC §2)
+_LIST_FILTER_LIMIT = 200  # gettracklist number filter (SPEC §2)
+
+
+def _chunk[T](items: Sequence[T], size: int = _BATCH_LIMIT) -> Iterator[Sequence[T]]:
+    """Split ``items`` into consecutive chunks of at most ``size``, in order."""
+    for start in range(0, len(items), size):
+        yield items[start : start + size]
+
+
+def _number_carrier_payload(item: NumberCarrier) -> dict[str, object]:
+    payload: dict[str, object] = {"number": item.number}
+    if item.carrier is not None:
+        payload["carrier"] = item.carrier
+    return payload
 
 
 class Track17Client:
@@ -35,32 +54,57 @@ class Track17Client:
         timeout: float = 30.0,
         max_retries: int = 3,
     ) -> None:
-        raise NotImplementedError
+        self._transport = _Transport(
+            api_key, session=session, timeout=timeout, max_retries=max_retries
+        )
+
+    async def _batched[R](
+        self,
+        endpoint: str,
+        payloads: Sequence[dict[str, object]],
+        parse: Callable[[dict[str, Any]], R],
+    ) -> BatchResult[R]:
+        """Dispatch ``payloads`` in chunks of 40 and merge into one result.
+
+        Chunks go through the transport throttle sequentially; accepted and
+        rejected items are concatenated across chunks in dispatch order.
+        """
+        accepted: list[R] = []
+        rejected: list[RejectedItem] = []
+        for chunk in _chunk(payloads):
+            data = await self._transport.request(endpoint, list(chunk))
+            accepted.extend(parse(item) for item in data.get("accepted") or [])
+            rejected.extend(RejectedItem.from_api(item) for item in data.get("rejected") or [])
+        return BatchResult(accepted=tuple(accepted), rejected=tuple(rejected))
 
     # --- registration lifecycle ---
 
     async def register(self, items: Sequence[TrackRegistration]) -> BatchResult[RegisteredNumber]:
-        raise NotImplementedError
+        raise NotImplementedError  # M4
 
     async def stop_track(self, items: Sequence[NumberCarrier]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError
+        raise NotImplementedError  # M4
 
     async def retrack(self, items: Sequence[NumberCarrier]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError
+        raise NotImplementedError  # M4
 
     async def delete_track(self, items: Sequence[NumberCarrier]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError
+        raise NotImplementedError  # M4
 
     async def change_carrier(self, items: Sequence[CarrierChange]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError
+        raise NotImplementedError  # M4
 
     async def change_info(self, items: Sequence[InfoChange]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError
+        raise NotImplementedError  # M4
 
     # --- reads ---
 
     async def get_track_info(self, items: Sequence[NumberCarrier]) -> BatchResult[TrackInfo]:
-        raise NotImplementedError
+        return await self._batched(
+            "gettrackinfo",
+            [_number_carrier_payload(item) for item in items],
+            TrackInfo.from_api,
+        )
 
     async def get_track_list(
         self,
@@ -70,10 +114,27 @@ class Track17Client:
         package_status: MainStatus | None = None,
         page_no: int = 1,
     ) -> TrackListPage:
-        raise NotImplementedError
+        if number_filter is not None and len(number_filter) > _LIST_FILTER_LIMIT:
+            raise ValueError(
+                f"gettracklist accepts at most {_LIST_FILTER_LIMIT} numbers as a "
+                f"filter; got {len(number_filter)}"
+            )
+        payload: dict[str, object] = {"page_no": page_no}
+        if number_filter:
+            payload["number"] = ",".join(number_filter)
+        if tracking_status is not None:
+            payload["tracking_status"] = tracking_status.value
+        if package_status is not None:
+            payload["package_status"] = package_status.value
+        envelope = await self._transport.request_envelope("gettracklist", payload)
+        return TrackListPage.from_api(envelope)
 
     async def get_quota(self) -> Quota:
-        raise NotImplementedError
+        # No parameters, but send an explicit empty JSON body so this POST
+        # carries the same content type as every other endpoint (json=None
+        # would send no body at all).
+        data = await self._transport.request("getquota", [])
+        return Quota.from_api(data)
 
     # --- metered, guarded ---
 
@@ -89,14 +150,14 @@ class Track17Client:
         (``CacheLevel.STANDARD`` deducts 1). INSTANT is never the default
         and must be opted into explicitly.
         """
-        raise NotImplementedError
+        raise NotImplementedError  # M6
 
     async def close(self) -> None:
         """Close only a client-owned session (never an injected one)."""
-        raise NotImplementedError
+        await self._transport.close()
 
     async def __aenter__(self) -> "Track17Client":
-        raise NotImplementedError
+        return self
 
     async def __aexit__(self, *exc: object) -> None:
-        raise NotImplementedError
+        await self.close()
