@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Any, Self
 
 from .enums import ErrorCode, MainStatus, SubStatus, TrackingStatus
+from .errors import Track17APIError
 
 # --- parsing helpers (internal) ---
 
@@ -331,7 +332,10 @@ class TrackListPage:
     """One 40-item page of the registered-number list.
 
     Note: on the wire, ``page`` is a *sibling* of ``code``/``data`` in the
-    envelope, so ``from_api`` accepts the full response envelope.
+    envelope, so ``from_api`` requires the **full response envelope** — a
+    ``data``-only dict (the transport's normal unwrapped result) has already
+    lost the pagination and is rejected loudly rather than mislabeling a
+    multi-page result as a single page.
     """
 
     items: tuple[RegisteredNumber, ...]
@@ -341,20 +345,20 @@ class TrackListPage:
 
     @classmethod
     def from_api(cls, raw: dict[str, Any]) -> Self:
-        page = raw.get("page") or {}
+        page = raw.get("page")
+        if not isinstance(page, dict):
+            raise Track17APIError(
+                -1,
+                "gettracklist payload has no top-level 'page' object; "
+                "TrackListPage.from_api requires the full response envelope",
+            )
         data = raw.get("data") or {}
-        accepted = data.get("accepted")
-        if accepted is None:
-            accepted = raw.get("accepted") or []
-        items = tuple(RegisteredNumber.from_api(item) for item in accepted)
-        page_no = page.get("page_no")
-        page_total = page.get("page_total")
-        data_total = page.get("data_total")
+        accepted = data.get("accepted") or []
         return cls(
-            items=items,
-            page_no=int(page_no) if page_no is not None else 1,
-            page_total=int(page_total) if page_total is not None else 1,
-            data_total=int(data_total) if data_total is not None else len(items),
+            items=tuple(RegisteredNumber.from_api(item) for item in accepted),
+            page_no=int(page["page_no"]),
+            page_total=int(page["page_total"]),
+            data_total=int(page["data_total"]),
         )
 
 

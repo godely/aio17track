@@ -4,6 +4,8 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 
+import pytest
+
 from aio17track import (
     ErrorCode,
     LatestStatus,
@@ -13,6 +15,7 @@ from aio17track import (
     RejectedItem,
     StoppedNotice,
     SubStatus,
+    Track17APIError,
     TrackEvent,
     TrackInfo,
     TrackingStatus,
@@ -202,6 +205,15 @@ def test_track_list_page_from_envelope(load_fixture: FixtureLoader) -> None:
     assert page.data_total == 43
     assert len(page.items) == 2
     assert page.items[0].number == "AA123456789BR"
+
+
+def test_track_list_page_rejects_data_only_payload(load_fixture: FixtureLoader) -> None:
+    """A data-only dict has already lost the sibling `page` object; silently
+    defaulting page_total to 1 would hide further pages from callers."""
+    envelope = load_fixture("gettracklist_page")
+
+    with pytest.raises(Track17APIError, match="page"):
+        TrackListPage.from_api(envelope["data"])
 
 
 # --- Quota ---
