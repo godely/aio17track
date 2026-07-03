@@ -3,7 +3,7 @@
 A thin layer over the public API: parse arguments, make the call, print.
 Human-readable lines by default; ``--json`` (after the subcommand) emits
 machine-readable output. The API key comes from ``--key`` or the
-``SEVENTEENTRACK_KEY`` / ``SEVENTEENTRACK_LIVE_KEY`` environment variables.
+``SEVENTEENTRACK_KEY`` environment variable.
 
 Exit codes: 0 success, 1 API/signature/lookup failure, 2 usage error.
 """
@@ -38,7 +38,7 @@ from .models import (
 )
 from .webhook import parse_event, verify_signature
 
-_KEY_ENV_VARS = ("SEVENTEENTRACK_KEY", "SEVENTEENTRACK_LIVE_KEY")
+_KEY_ENV_VAR = "SEVENTEENTRACK_KEY"
 
 
 class _UsageError(Exception):
@@ -48,13 +48,11 @@ class _UsageError(Exception):
 def _resolve_key(args: argparse.Namespace) -> str:
     if args.key:
         return str(args.key)
-    for env_var in _KEY_ENV_VARS:
-        key = os.environ.get(env_var)
-        if key:
-            return key
+    key = os.environ.get(_KEY_ENV_VAR)
+    if key:
+        return key
     raise _UsageError(
-        "no API key: pass --key or set SEVENTEENTRACK_KEY (or "
-        "SEVENTEENTRACK_LIVE_KEY) in the environment"
+        f"no API key: pass --key or set {_KEY_ENV_VAR} in the environment"
     )
 
 
@@ -301,10 +299,7 @@ async def _cmd_webhook_parse(args: argparse.Namespace) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument(
-        "--key",
-        help="17token API key (default: $SEVENTEENTRACK_KEY, then $SEVENTEENTRACK_LIVE_KEY)",
-    )
+    common.add_argument("--key", help="17token API key (default: $SEVENTEENTRACK_KEY)")
     common.add_argument("--json", action="store_true", help="emit JSON output")
 
     parser = argparse.ArgumentParser(
