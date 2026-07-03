@@ -14,7 +14,7 @@ Wrap the official 17TRACK Tracking API v2.4 (`https://api.17track.net/track/v2.4
 **Non-goals:**
 - No Home Assistant code. This package must not import `homeassistant`. It is consumed by a separate HA component later, and by anyone else.
 - No consumer-account (email/password) path. That is the incumbent's reverse-engineered approach and is explicitly excluded.
-- No persistence, no scheduling, no CLI in v0.1. The client makes calls; the caller owns state.
+- No persistence, no scheduling, no CLI in v0.1 **on `master`**. The client makes calls; the caller owns state. (An experimental CLI exists on the `dev` branch as a documented deviation — see §14.)
 
 ---
 
@@ -358,3 +358,29 @@ Do these in sequence. Each is independently reviewable.
 - **M6 — Realtime (guarded) + polish.** `get_realtime_track_info`, docstrings, README, live suite, 0.1.0 tag.
 
 Stop after M0 for review before implementing bodies.
+
+---
+
+## 14. Branching & deviations
+
+Two long-lived branches:
+
+- **`master` is the SPEC-conformant mainline.** Every signature and rule in
+  this document is binding there. Releases (including the 0.1.0 tag) are cut
+  from `master` only. Judgment calls that *fill gaps* in this SPEC (mapping
+  decisions the SPEC doesn't pin down) belong on `master`, flagged in the PR.
+- **`dev` is the deviation line.** Features that *contradict* this SPEC live
+  there: branch off `dev`, PR back into `dev`, never target `master`
+  directly. `master` is merged into `dev` periodically so the experimental
+  line tracks the mainline. `dev` runs the same CI as `master`.
+- **Promotion requires amendment.** Moving a deviation from `dev` to
+  `master` requires updating this SPEC (in or before the promotion PR) so
+  `master` and SPEC never disagree.
+
+Current deviations on `dev`:
+
+- **CLI (M7).** An `argparse`-based command-line interface (`aio17track`
+  console script + `python -m aio17track`) covering every client method,
+  carrier lookups, and webhook verify/parse. Stdlib-only, so the §3
+  dependency policy holds; the library's public API surface is unchanged.
+  Supersedes §1's "no CLI" only on `dev`.
