@@ -1,0 +1,9 @@
+{
+  "event": "TRACKING_STOPPED",
+  "data": {
+    "number": "AA123456789BR",
+    "carrier": 2151,
+    "param": null,
+    "tag": ""
+  }
+}

@@ -1,0 +1,128 @@
+{
+  "code": 0,
+  "data": {
+    "accepted": [
+      {
+        "number": "AA555666777BR",
+        "carrier": 2151,
+        "param": null,
+        "tag": null,
+        "lang": null,
+        "special_tracking_info": null,
+        "track_info": {
+          "shipping_info": {
+            "shipper_address": {
+              "country": "BR",
+              "state": null,
+              "city": null,
+              "street": null,
+              "postal_code": null,
+              "coordinates": { "longitude": null, "latitude": null }
+            },
+            "recipient_address": {
+              "country": "PT",
+              "state": null,
+              "city": null,
+              "street": null,
+              "postal_code": null,
+              "coordinates": { "longitude": null, "latitude": null }
+            }
+          },
+          "latest_status": {
+            "status": "Exception",
+            "sub_status": "Exception_Returning",
+            "sub_status_descr": "Package is being returned to the sender."
+          },
+          "latest_event": {
+            "time_iso": "2026-06-27T11:15:00-03:00",
+            "time_utc": "2026-06-27T14:15:00Z",
+            "time_raw": { "date": "2026-06-27", "time": "11:15:00", "timezone": "-03:00" },
+            "description": "Em devolução ao remetente",
+            "description_translation": { "lang": "en", "description": "Being returned to sender" },
+            "location": "CURITIBA, PR",
+            "stage": "Returning",
+            "sub_status": "Exception_Returning",
+            "address": {
+              "country": "BR",
+              "state": "PR",
+              "city": "CURITIBA",
+              "street": null,
+              "postal_code": null,
+              "coordinates": { "longitude": null, "latitude": null }
+            }
+          },
+          "time_metrics": {
+            "days_after_order": 20,
+            "days_of_transit": 19,
+            "days_of_transit_done": 0,
+            "days_after_last_update": 4,
+            "estimated_delivery_date": { "source": null, "from": null, "to": null }
+          },
+          "milestone": [
+            {
+              "key_stage": "Returning",
+              "time_iso": "2026-06-27T11:15:00-03:00",
+              "time_utc": "2026-06-27T14:15:00Z",
+              "time_raw": { "date": "2026-06-27", "time": "11:15:00", "timezone": "-03:00" }
+            }
+          ],
+          "misc_info": {
+            "risk_factor": 1,
+            "service_type": null,
+            "weight_raw": null,
+            "weight_kg": null,
+            "pieces": null,
+            "dimensions": null,
+            "customer_number": null,
+            "reference_number": null,
+            "local_number": "AA555666777BR",
+            "local_provider": "Correios",
+            "local_key": 2151
+          },
+          "tracking": {
+            "providers_hash": 40113581,
+            "providers": [
+              {
+                "provider": {
+                  "key": 2151,
+                  "name": "Correios",
+                  "alias": "Correios Brazil",
+                  "tel": null,
+                  "homepage": "https://www.correios.com.br/",
+                  "country": "BR"
+                },
+                "service_type": null,
+                "latest_sync_status": "Success",
+                "latest_sync_time": "2026-07-01T00:20:33Z",
+                "provider_lang": "pt",
+                "provider_tips": null,
+                "events_hash": 6621351,
+                "events": [
+                  {
+                    "time_iso": "2026-06-27T11:15:00-03:00",
+                    "time_utc": "2026-06-27T14:15:00Z",
+                    "time_raw": { "date": "2026-06-27", "time": "11:15:00", "timezone": "-03:00" },
+                    "description": "Em devolução ao remetente",
+                    "description_translation": { "lang": "en", "description": "Being returned to sender" },
+                    "location": "CURITIBA, PR",
+                    "stage": "Returning",
+                    "sub_status": "Exception_Returning",
+                    "address": {
+                      "country": "BR",
+                      "state": "PR",
+                      "city": "CURITIBA",
+                      "street": null,
+                      "postal_code": null,
+                      "coordinates": { "longitude": null, "latitude": null }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "rejected": []
+  }
+}

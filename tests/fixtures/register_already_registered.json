@@ -1,0 +1,16 @@
+{
+  "code": 0,
+  "data": {
+    "accepted": [],
+    "rejected": [
+      {
+        "number": "AA123456789BR",
+        "carrier": 2151,
+        "error": {
+          "code": -18019901,
+          "message": "Tracking number AA123456789BR is already registered."
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,180 @@
+{
+  "code": 0,
+  "data": {
+    "accepted": [
+      {
+        "number": "AA123456789BR",
+        "carrier": 2151,
+        "param": null,
+        "tag": "order-1042",
+        "lang": null,
+        "destination_postal_code": null,
+        "origin_country": null,
+        "destination_country": null,
+        "destination_city": null,
+        "ship_date": null,
+        "shipper": null,
+        "consignee": null,
+        "phone_number_last_4": null,
+        "phone_number": null,
+        "cpf_or_cnpj": null,
+        "special_tracking_info": null,
+        "track_info": {
+          "shipping_info": {
+            "shipper_address": {
+              "country": "BR",
+              "state": "SP",
+              "city": "SAO PAULO",
+              "street": null,
+              "postal_code": "01000-000",
+              "coordinates": { "longitude": "-46.633309", "latitude": "-23.550520" }
+            },
+            "recipient_address": {
+              "country": "BR",
+              "state": "PE",
+              "city": "RECIFE",
+              "street": null,
+              "postal_code": "50000-000",
+              "coordinates": { "longitude": null, "latitude": null }
+            }
+          },
+          "latest_status": {
+            "status": "Delivered",
+            "sub_status": "Delivered_Other",
+            "sub_status_descr": null
+          },
+          "latest_event": {
+            "time_iso": null,
+            "time_utc": null,
+            "time_raw": { "date": "2026-06-30", "time": "14:23:00", "timezone": null },
+            "description": "Objeto entregue ao destinatário",
+            "description_translation": { "lang": "en", "description": "Object delivered to the recipient" },
+            "location": "RECIFE, PE",
+            "stage": "Delivered",
+            "sub_status": "Delivered_Other",
+            "address": {
+              "country": "BR",
+              "state": "PE",
+              "city": "RECIFE",
+              "street": null,
+              "postal_code": "50000-000",
+              "coordinates": { "longitude": null, "latitude": null }
+            }
+          },
+          "time_metrics": {
+            "days_after_order": 6,
+            "days_of_transit": 5,
+            "days_of_transit_done": 5,
+            "days_after_last_update": 3,
+            "estimated_delivery_date": { "source": null, "from": null, "to": null }
+          },
+          "milestone": [
+            {
+              "key_stage": "PickedUp",
+              "time_iso": "2026-06-25T10:12:00-03:00",
+              "time_utc": "2026-06-25T13:12:00Z",
+              "time_raw": { "date": "2026-06-25", "time": "10:12:00", "timezone": "-03:00" }
+            },
+            {
+              "key_stage": "Delivered",
+              "time_iso": null,
+              "time_utc": null,
+              "time_raw": { "date": "2026-06-30", "time": "14:23:00", "timezone": null }
+            }
+          ],
+          "misc_info": {
+            "risk_factor": 0,
+            "service_type": "SEDEX",
+            "weight_raw": null,
+            "weight_kg": null,
+            "pieces": null,
+            "dimensions": null,
+            "customer_number": null,
+            "reference_number": null,
+            "local_number": "AA123456789BR",
+            "local_provider": "Correios",
+            "local_key": 2151
+          },
+          "tracking": {
+            "providers_hash": 118220451,
+            "providers": [
+              {
+                "provider": {
+                  "key": 2151,
+                  "name": "Correios",
+                  "alias": "Correios Brazil",
+                  "tel": null,
+                  "homepage": "https://www.correios.com.br/",
+                  "country": "BR"
+                },
+                "service_type": "SEDEX",
+                "latest_sync_status": "Success",
+                "latest_sync_time": "2026-06-30T18:01:12Z",
+                "provider_lang": "pt",
+                "provider_tips": null,
+                "events_hash": -104481533,
+                "events": [
+                  {
+                    "time_iso": null,
+                    "time_utc": null,
+                    "time_raw": { "date": "2026-06-30", "time": "14:23:00", "timezone": null },
+                    "description": "Objeto entregue ao destinatário",
+                    "description_translation": { "lang": "en", "description": "Object delivered to the recipient" },
+                    "location": "RECIFE, PE",
+                    "stage": "Delivered",
+                    "sub_status": "Delivered_Other",
+                    "address": {
+                      "country": "BR",
+                      "state": "PE",
+                      "city": "RECIFE",
+                      "street": null,
+                      "postal_code": "50000-000",
+                      "coordinates": { "longitude": null, "latitude": null }
+                    }
+                  },
+                  {
+                    "time_iso": "2026-06-28T08:40:00-03:00",
+                    "time_utc": "2026-06-28T11:40:00Z",
+                    "time_raw": { "date": "2026-06-28", "time": "08:40:00", "timezone": "-03:00" },
+                    "description": "Objeto saiu para entrega ao destinatário",
+                    "description_translation": { "lang": "en", "description": "Object out for delivery to the recipient" },
+                    "location": "RECIFE, PE",
+                    "stage": "OutForDelivery",
+                    "sub_status": "OutForDelivery_Other",
+                    "address": {
+                      "country": "BR",
+                      "state": "PE",
+                      "city": "RECIFE",
+                      "street": null,
+                      "postal_code": "50000-000",
+                      "coordinates": { "longitude": "-34.877", "latitude": "-8.0539" }
+                    }
+                  },
+                  {
+                    "time_iso": "2026-06-25T10:12:00-03:00",
+                    "time_utc": "2026-06-25T13:12:00Z",
+                    "time_raw": { "date": "2026-06-25", "time": "10:12:00", "timezone": "-03:00" },
+                    "description": "Objeto postado",
+                    "description_translation": { "lang": "en", "description": "Object posted" },
+                    "location": "SAO PAULO, SP",
+                    "stage": "PickedUp",
+                    "sub_status": "InTransit_PickedUp",
+                    "address": {
+                      "country": "BR",
+                      "state": "SP",
+                      "city": "SAO PAULO",
+                      "street": null,
+                      "postal_code": "01000-000",
+                      "coordinates": { "longitude": "-46.633309", "latitude": "-23.550520" }
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    ],
+    "rejected": []
+  }
+}
