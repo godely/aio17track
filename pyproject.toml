@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aio17track"
+version = "0.1.0"
+description = "Dependency-light async Python client for the 17TRACK Tracking API v2.4"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["17track", "tracking", "shipping", "asyncio", "aiohttp"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Framework :: AsyncIO",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = ["aiohttp>=3.9"]
+
+[dependency-groups]
+dev = [
+  "pytest>=8",
+  "pytest-asyncio>=0.24",
+  "aioresponses>=0.7",
+  "mypy>=1.13",
+  "ruff>=0.8",
+]
+
+# Ships aio17track/py.typed (PEP 561) with the wheel: hatchling includes every
+# file inside the listed package directory.
+[tool.hatch.build.targets.wheel]
+packages = ["aio17track"]
+
+[tool.hatch.build.targets.sdist]
+include = ["/aio17track", "/tests", "/README.md", "/SPEC.md"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+addopts = "-m 'not live'"
+markers = [
+  "live: tests that hit the real 17TRACK API (opt-in via SEVENTEENTRACK_LIVE_KEY)",
+]
