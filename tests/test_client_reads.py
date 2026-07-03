@@ -66,6 +66,8 @@ async def test_get_quota(load_fixture: FixtureLoader) -> None:
         with aioresponses() as mocked:
             mocked.post(_QUOTA_URL, payload=load_fixture("getquota"))
             quota = await client.get_quota()
+            # parameterless, but still a JSON body (consistent content type)
+            assert _sent_json(_calls(mocked, _QUOTA_URL)[0]) == []
     assert quota.remaining == 1098
     assert quota.used == 2
     assert quota.total == 1100
