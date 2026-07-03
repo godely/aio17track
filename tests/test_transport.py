@@ -150,6 +150,14 @@ def test_other_nonzero_codes_raise_api_error_with_code() -> None:
     assert excinfo.value.code == -18010003
 
 
+@pytest.mark.parametrize("envelope", [{}, {"data": {}}, {"code": "0", "data": {}}])
+def test_missing_or_non_integer_code_is_not_success(envelope: dict[str, object]) -> None:
+    """Only an integer code == 0 may pass; a gateway 200 without the 17track
+    envelope must not turn into an empty success."""
+    with pytest.raises(Track17APIError, match="code"):
+        _check_envelope(envelope)
+
+
 def test_data_errors_with_zero_code_still_raise() -> None:
     """The documented illegal-parameter shape: code 0 + data.errors[]."""
     envelope = {

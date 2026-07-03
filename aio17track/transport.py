@@ -109,7 +109,11 @@ def _check_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     left for the model layer.
     """
     code = envelope.get("code")
-    if isinstance(code, int) and code != 0:
+    if not isinstance(code, int):
+        # Only code == 0 may pass; a missing or non-integer code is not a
+        # success envelope, however a gateway may have dressed it up.
+        raise Track17APIError(-1, "response envelope has no integer 'code' field")
+    if code != 0:
         _raise_mapped(code, f"request-level error {code}")
     data = envelope.get("data")
     if isinstance(data, dict):
@@ -172,6 +176,7 @@ class _Transport:
     async def request_envelope(self, endpoint: str, payload: object) -> dict[str, Any]:
         """POST ``payload`` and return the full validated response envelope."""
         attempt = 1
+        retry_delay: float
         while True:
             await self._bucket.acquire()
             try:
@@ -181,43 +186,46 @@ class _Transport:
                     headers={_AUTH_HEADER: self._api_key},
                     timeout=self._timeout,
                 ) as response:
-                    if response.status == 429 or response.status >= 500:
+                    status = response.status
+                    if status == 429 or status >= 500:
                         retry_after = _parse_retry_after(response.headers.get("Retry-After"))
                         if attempt >= self._max_retries:
-                            if response.status == 429:
+                            if status == 429:
                                 raise RateLimitError(
                                     "rate limited by 17track and retries exhausted",
                                     retry_after=retry_after,
                                 )
                             raise Track17APIError(
-                                response.status,
-                                f"HTTP {response.status} from 17track after "
-                                f"{attempt} attempts",
+                                status,
+                                f"HTTP {status} from 17track after {attempt} attempts",
                             )
-                        await self._sleep(_retry_delay(attempt, retry_after, self._rng))
-                        attempt += 1
-                        continue
-                    if response.status == 401:
-                        raise AuthenticationError(
-                            "HTTP 401: check the 17token API key, IP whitelist, "
-                            "and account status"
-                        )
-                    if response.status >= 400:
-                        # Non-retryable 4xx fail fast (SPEC §4).
-                        raise Track17APIError(
-                            response.status, f"HTTP {response.status} from 17track"
-                        )
-                    try:
-                        envelope: dict[str, Any] = await response.json(content_type=None)
-                    except ValueError as exc:  # malformed JSON body
-                        raise Track17APIError(-1, "response body is not valid JSON") from exc
+                        retry_delay = _retry_delay(attempt, retry_after, self._rng)
+                    else:
+                        if status == 401:
+                            raise AuthenticationError(
+                                "HTTP 401: check the 17token API key, IP whitelist, "
+                                "and account status"
+                            )
+                        if status >= 400:
+                            # Non-retryable 4xx fail fast (SPEC §4).
+                            raise Track17APIError(status, f"HTTP {status} from 17track")
+                        try:
+                            envelope: dict[str, Any] = await response.json(content_type=None)
+                        except ValueError as exc:  # malformed JSON body
+                            raise Track17APIError(
+                                -1, "response body is not valid JSON"
+                            ) from exc
+                        return _check_envelope(envelope)
             except TimeoutError as exc:
                 raise Track17ConnectionError(
                     f"request to '{endpoint}' timed out"
                 ) from exc
             except aiohttp.ClientError as exc:
                 raise Track17ConnectionError(str(exc)) from exc
-            return _check_envelope(envelope)
+            # Retryable status: reached only after the async-with released the
+            # response, so a bounded connector is not held during the backoff.
+            await self._sleep(retry_delay)
+            attempt += 1
 
     async def close(self) -> None:
         """Close the session only if this transport created it."""
