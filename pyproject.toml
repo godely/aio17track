@@ -21,6 +21,9 @@ classifiers = [
 ]
 dependencies = ["aiohttp>=3.9"]
 
+[project.scripts]
+aio17track = "aio17track.cli:main"
+
 [dependency-groups]
 dev = [
   "pytest>=8",

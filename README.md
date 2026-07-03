@@ -90,6 +90,30 @@ fresh = await client.get_realtime_track_info(
 )
 ```
 
+## CLI
+
+Everything above is also drivable with no code, via `aio17track` (or
+`python -m aio17track`). The key comes from `--key` or
+`$SEVENTEENTRACK_KEY`:
+
+```sh
+export SEVENTEENTRACK_KEY="your-17token"
+
+aio17track quota
+aio17track register RR123456789BR --carrier 2151 --tag my-order
+aio17track info RR123456789BR --carrier 2151 --events
+aio17track list --tracking-status Tracking
+aio17track delete RR123456789BR
+aio17track carriers --search correios
+aio17track webhook-verify --sign "$SIGN_HEADER" --body body.json
+aio17track realtime RR123456789BR --carrier 2151   # 1 credit
+# --instant deducts 10 credits per number — deliberate flag, never default
+```
+
+Add `--json` after any subcommand for machine-readable output. Exit codes:
+`0` success (including partial success — check the `rejected:` lines),
+`1` API failure, `2` usage error.
+
 ## Errors
 
 Request-level failures raise (`AuthenticationError`, `RateLimitError`,
