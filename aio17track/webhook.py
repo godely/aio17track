@@ -70,15 +70,21 @@ def parse_event(raw_body: bytes) -> WebhookEvent:
     if not isinstance(data, dict):
         raise Track17APIError(-1, "webhook body has no 'data' object")
 
-    try:
-        if event is WebhookEventType.TRACKING_UPDATED:
-            return WebhookEvent(event=event, data=TrackInfo.from_api(data))
-        if event is WebhookEventType.TRACKING_STOPPED:
+    if event in (WebhookEventType.TRACKING_UPDATED, WebhookEventType.TRACKING_STOPPED):
+        # The documented payloads always carry both identifiers; the API
+        # models are deliberately permissive, so enforce presence here rather
+        # than let a missing carrier default to 0 or a bad one leak ValueError.
+        for field in ("number", "carrier"):
+            if data.get(field) is None:
+                raise Track17APIError(
+                    -1, f"webhook data is missing required field {field!r}"
+                )
+        try:
+            if event is WebhookEventType.TRACKING_UPDATED:
+                return WebhookEvent(event=event, data=TrackInfo.from_api(data))
             return WebhookEvent(event=event, data=StoppedNotice.from_api(data))
-    except KeyError as exc:
-        raise Track17APIError(
-            -1, f"webhook data is missing required field {exc.args[0]!r}"
-        ) from exc
+        except (KeyError, TypeError, ValueError) as exc:
+            raise Track17APIError(-1, f"webhook data is malformed: {exc}") from exc
     # The enum lookup never raises (forward-compat rule); an event we do not
     # know still fails here because its data shape is unknowable.
     raise Track17APIError(-1, f"unrecognized webhook event {payload.get('event')!r}")

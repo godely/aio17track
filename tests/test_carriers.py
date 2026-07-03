@@ -81,6 +81,33 @@ async def test_disk_cache_written_and_reused(tmp_path: Path) -> None:
     assert fresh.name(190012) == "Yanwen"
 
 
+async def test_invalid_payload_is_never_persisted(tmp_path: Path) -> None:
+    """A 200 with valid JSON that is not the carrier array must not poison
+    the on-disk cache: load fails loudly and no cache file is written."""
+    cache_file = tmp_path / "carriers.json"
+    catalog = CarrierCatalog(cache_path=cache_file)
+    async with aiohttp.ClientSession() as session:
+        with aioresponses() as mocked:
+            mocked.get(_CARRIER_LIST_URL, payload={"error": "maintenance"})
+            with pytest.raises(Track17APIError, match="array"):
+                await catalog.load(session)
+    assert not cache_file.exists()
+
+
+async def test_shape_poisoned_cache_recovers_via_refetch(tmp_path: Path) -> None:
+    """Valid-JSON-but-wrong-shape cache content triggers a refetch and gets
+    repaired instead of being reused forever."""
+    cache_file = tmp_path / "carriers.json"
+    cache_file.write_text('{"error": "maintenance"}')
+    catalog = CarrierCatalog(cache_path=cache_file)
+    async with aiohttp.ClientSession() as session:
+        with aioresponses() as mocked:
+            mocked.get(_CARRIER_LIST_URL, payload=_SAMPLE)
+            await catalog.load(session)
+    assert catalog.name(2151) == "Correios"
+    assert json.loads(cache_file.read_text()) == _SAMPLE  # cache repaired
+
+
 async def test_corrupt_disk_cache_falls_back_to_fetch(tmp_path: Path) -> None:
     cache_file = tmp_path / "carriers.json"
     cache_file.write_text("{ not json")

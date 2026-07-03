@@ -112,6 +112,10 @@ def test_parse_tracking_updated(load_fixture: FixtureLoader) -> None:
         b'{"data": {"number": "X"}}',  # no event
         b'{"event": "SOMETHING_NEW", "data": {"number": "X"}}',  # unknown event
         b'{"event": "TRACKING_STOPPED", "data": {"carrier": 3011}}',  # missing number
+        b'{"event": "TRACKING_STOPPED", "data": {"number": "X"}}',  # missing carrier
+        b'{"event": "TRACKING_UPDATED", "data": {"carrier": 3011}}',  # missing number
+        # nonnumeric carrier must not leak ValueError
+        b'{"event": "TRACKING_STOPPED", "data": {"number": "X", "carrier": "not-a-code"}}',
     ],
 )
 def test_malformed_bodies_raise_api_error(raw: bytes) -> None:

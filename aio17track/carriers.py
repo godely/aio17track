@@ -16,10 +16,12 @@ import aiohttp
 
 from .errors import Track17APIError, Track17ConnectionError
 
-# SPEC §10 names carrier.all.json. Note: the API's own error messages point
-# to apicarrier.all.json for API carrier codes.
-# TODO(M6): confirm against a live account which list matches the API keys.
-_CARRIER_LIST_URL = "https://res.17track.net/asset/carrier/info/carrier.all.json"
+# SPEC §10 names carrier.all.json, but this catalog exists to map names to
+# the integer codes the API's `carrier` parameter accepts — and the API's
+# own -18019903 error message directs users to apicarrier.all.json for
+# exactly those keys, so that is the list fetched here (deliberate SPEC
+# deviation). TODO(M6): sanity-check a few keys against a live account.
+_CARRIER_LIST_URL = "https://res.17track.net/asset/carrier/info/apicarrier.all.json"
 
 
 class CarrierCatalog:
@@ -38,12 +40,21 @@ class CarrierCatalog:
         """Fetch the carrier list (or read the on-disk cache) and index it."""
         if self._by_code is not None:
             return
-        raw = self._read_cache()
-        if raw is None:
-            raw = await self._fetch(session)
-            if self._cache_path is not None:
-                self._cache_path.write_text(json.dumps(raw), encoding="utf-8")
+        cached = self._read_cache()
+        if cached is not None:
+            try:
+                self._index(cached)
+            except Track17APIError:
+                pass  # poisoned cache (valid JSON, wrong shape): refetch
+            else:
+                return
+        raw = await self._fetch(session)
+        # Index before persisting: only a payload that validated as a
+        # carrier list is written, so a bad CDN response (valid JSON but
+        # not the array) can never poison the cache.
         self._index(raw)
+        if self._cache_path is not None:
+            self._cache_path.write_text(json.dumps(raw), encoding="utf-8")
 
     def _read_cache(self) -> Any | None:
         if self._cache_path is None or not self._cache_path.exists():
@@ -51,7 +62,7 @@ class CarrierCatalog:
         try:
             return json.loads(self._cache_path.read_text(encoding="utf-8"))
         except ValueError:
-            return None  # corrupt cache: fall through to a fresh fetch
+            return None  # unreadable cache: fall through to a fresh fetch
 
     async def _fetch(self, session: aiohttp.ClientSession) -> Any:
         try:
