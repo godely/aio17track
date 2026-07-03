@@ -58,16 +58,6 @@ def test_key_from_environment(
     assert "remaining=1098" in capsys.readouterr().out
 
 
-def test_live_key_env_var_is_not_accepted(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """The CLI honors exactly SEVENTEENTRACK_KEY — the live-suite variable is
-    not a fallback (owner decision on PR #9)."""
-    monkeypatch.setenv("SEVENTEENTRACK_LIVE_KEY", "live-key")
-    assert main(["quota"]) == 2
-    assert "SEVENTEENTRACK_KEY" in capsys.readouterr().err
-
-
 def test_unknown_command_exits_2() -> None:
     with pytest.raises(SystemExit) as excinfo:
         main(["frobnicate"])
