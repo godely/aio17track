@@ -113,6 +113,18 @@ def test_register_reports_rejections(
     assert "rejected: 1234  [-18010012] INVALID_DATA_FORMAT" in out
 
 
+def test_register_passes_param_through_to_the_wire() -> None:
+    """Carriers that require the extra param (phone/zip) work from the CLI."""
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/register", callback=_echo_accepted)
+        exit_code = main(
+            ["register", "LP00123456789", "--carrier", "190012", "--param", "90210", "--key", "k"]
+        )
+        sent = mocked.requests[("POST", URL(f"{_BASE}/register"))][0].kwargs["json"]
+    assert exit_code == 0
+    assert sent == [{"number": "LP00123456789", "carrier": 190012, "param": "90210"}]
+
+
 def test_api_error_exits_1(capsys: pytest.CaptureFixture[str]) -> None:
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/getquota", status=401)
@@ -246,6 +258,24 @@ def test_webhook_verify_and_parse(
     out = capsys.readouterr().out
     assert "TRACKING_STOPPED" in out
     assert "AA123456789BR (carrier 2151)" in out
+
+
+def test_webhook_verify_json_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """--json holds for webhook-verify too: {"valid": bool}, same exit codes."""
+    body = b'{"event":"TRACKING_STOPPED","data":{"number":"X","carrier":1}}'
+    body_file = tmp_path / "body.json"
+    body_file.write_bytes(body)
+    sign = hashlib.sha256(body + b"/my-key").hexdigest()
+
+    good = ["webhook-verify", "--sign", sign, "--body", str(body_file), "--key", "my-key"]
+    assert main([*good, "--json"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"valid": True}
+
+    bad = ["webhook-verify", "--sign", "0" * 64, "--body", str(body_file), "--key", "my-key"]
+    assert main([*bad, "--json"]) == 1
+    assert json.loads(capsys.readouterr().out) == {"valid": False}
 
 
 def test_webhook_parse_malformed_body_exits_1(

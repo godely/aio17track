@@ -166,6 +166,7 @@ async def _cmd_register(args: argparse.Namespace) -> int:
             tag=args.tag,
             order_no=args.order_no,
             lang=args.lang,
+            param=args.param,
         )
         for number in args.numbers
     ]
@@ -275,9 +276,15 @@ async def _cmd_webhook_verify(args: argparse.Namespace) -> int:
     try:
         verify_signature(body, args.sign, _resolve_key(args))
     except SignatureError:
-        print("signature INVALID", file=sys.stderr)
+        if args.json:
+            _emit_json({"valid": False})
+        else:
+            print("signature INVALID", file=sys.stderr)
         return 1
-    print("signature ok")
+    if args.json:
+        _emit_json({"valid": True})
+    else:
+        print("signature ok")
     return 0
 
 
@@ -325,6 +332,9 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--tag")
     sub.add_argument("--order-no")
     sub.add_argument("--lang")
+    sub.add_argument(
+        "--param", help="extra carrier parameter (phone/zip), when the carrier requires it"
+    )
 
     sub = command("info", _cmd_info, "get tracking info for registered numbers")
     sub.add_argument("numbers", nargs="+")
