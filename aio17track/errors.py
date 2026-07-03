@@ -22,6 +22,10 @@ class RateLimitError(Track17Error):
 
     retry_after: float | None
 
+    def __init__(self, message: str, *, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
 
 class QuotaExhaustedError(Track17Error):
     """Codes -18019907 / -18019908."""
@@ -36,3 +40,8 @@ class Track17APIError(Track17Error):
 
     code: int
     message: str
+
+    def __init__(self, code: int, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+        self.message = message
