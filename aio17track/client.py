@@ -43,6 +43,46 @@ def _number_carrier_payload(item: NumberCarrier) -> dict[str, object]:
     return payload
 
 
+def _registration_payload(item: TrackRegistration) -> dict[str, object]:
+    payload: dict[str, object] = {"number": item.number}
+    if item.carrier is not None:
+        payload["carrier"] = item.carrier
+    if item.tag is not None:
+        payload["tag"] = item.tag
+    if item.order_no is not None:
+        payload["order_no"] = item.order_no
+    if item.lang is not None:
+        payload["lang"] = item.lang
+    if item.param is not None:
+        # TODO(M6): confirm against the live API — the v2.4 register doc lists
+        # dedicated fields (destination_postal_code, phone_number, ...) rather
+        # than a generic "param", but responses still carry "param".
+        payload["param"] = item.param
+    return payload
+
+
+def _carrier_change_payload(item: CarrierChange) -> dict[str, object]:
+    return {
+        "number": item.number,
+        "carrier_old": item.carrier_old,
+        "carrier_new": item.carrier_new,
+    }
+
+
+def _info_change_payload(item: InfoChange) -> dict[str, object]:
+    # changeinfo nests the fields being changed under "items"; only
+    # number/carrier identify the registration at the top level.
+    items: dict[str, object] = {}
+    if item.tag is not None:
+        items["tag"] = item.tag
+    if item.order_no is not None:
+        items["order_no"] = item.order_no
+    payload: dict[str, object] = {"number": item.number, "items": items}
+    if item.carrier is not None:
+        payload["carrier"] = item.carrier
+    return payload
+
+
 class Track17Client:
     """Async client for the 17TRACK Tracking API v2.4 (header auth, ``17token``)."""
 
@@ -80,22 +120,52 @@ class Track17Client:
     # --- registration lifecycle ---
 
     async def register(self, items: Sequence[TrackRegistration]) -> BatchResult[RegisteredNumber]:
-        raise NotImplementedError  # M4
+        """Register numbers for tracking (1 credit per successful registration).
+
+        An already-registered number lands in ``rejected`` with
+        ``ErrorCode.ALREADY_REGISTERED``; see ``BatchResult.already_registered``.
+        """
+        return await self._batched(
+            "register",
+            [_registration_payload(item) for item in items],
+            RegisteredNumber.from_api,
+        )
 
     async def stop_track(self, items: Sequence[NumberCarrier]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError  # M4
+        return await self._batched(
+            "stoptrack",
+            [_number_carrier_payload(item) for item in items],
+            NumberCarrier.from_api,
+        )
 
     async def retrack(self, items: Sequence[NumberCarrier]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError  # M4
+        """Restart tracking for stopped numbers (each number can retrack once)."""
+        return await self._batched(
+            "retrack",
+            [_number_carrier_payload(item) for item in items],
+            NumberCarrier.from_api,
+        )
 
     async def delete_track(self, items: Sequence[NumberCarrier]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError  # M4
+        return await self._batched(
+            "deletetrack",
+            [_number_carrier_payload(item) for item in items],
+            NumberCarrier.from_api,
+        )
 
     async def change_carrier(self, items: Sequence[CarrierChange]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError  # M4
+        return await self._batched(
+            "changecarrier",
+            [_carrier_change_payload(item) for item in items],
+            NumberCarrier.from_api,
+        )
 
     async def change_info(self, items: Sequence[InfoChange]) -> BatchResult[NumberCarrier]:
-        raise NotImplementedError  # M4
+        return await self._batched(
+            "changeinfo",
+            [_info_change_payload(item) for item in items],
+            NumberCarrier.from_api,
+        )
 
     # --- reads ---
 

@@ -92,10 +92,23 @@ class TrackRegistration:
 
 @dataclass(slots=True, frozen=True)
 class NumberCarrier:
-    """A tracking number plus optional carrier code."""
+    """A tracking number plus optional carrier code.
+
+    Used both as input and as the accepted-item shape returned by the
+    mutation endpoints (stoptrack/retrack/deletetrack/changecarrier/
+    changeinfo), hence the ``from_api`` despite being caller-constructible.
+    """
 
     number: str
     carrier: int | None = None
+
+    @classmethod
+    def from_api(cls, raw: dict[str, Any]) -> Self:
+        carrier = raw.get("carrier")
+        if carrier is None:
+            # changecarrier accepted items carry the new code instead.
+            carrier = raw.get("carrier_new")
+        return cls(number=str(raw["number"]), carrier=_opt_int(carrier))
 
 
 @dataclass(slots=True, frozen=True)
