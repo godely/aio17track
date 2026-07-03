@@ -92,9 +92,17 @@ fresh = await client.get_realtime_track_info(
 
 ## CLI
 
-Everything above is also drivable with no code, via `aio17track` (or
-`python -m aio17track`). The key comes from `--key` or
-`$SEVENTEENTRACK_KEY`:
+Everything above is also drivable with no code. The CLI is
+[Typer](https://typer.tiangolo.com/)-based and ships as an optional extra,
+so the base library keeps `aiohttp` as its only runtime dependency:
+
+```sh
+uv tool install "aio17track[cli]"   # or: pip install "aio17track[cli]"
+```
+
+Run it as `aio17track` (or `python -m aio17track`). Every command has rich
+`--help`; shell completion comes via `aio17track --install-completion`. The
+key comes from `--key` or `$SEVENTEENTRACK_KEY`:
 
 ```sh
 export SEVENTEENTRACK_KEY="your-17token"

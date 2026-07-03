@@ -1,24 +1,31 @@
-"""Command-line interface — drive the client with no code (M7).
+"""Command-line interface — drive the client with no code.
 
-A thin layer over the public API: parse arguments, make the call, print.
-Human-readable lines by default; ``--json`` (after the subcommand) emits
-machine-readable output. The API key comes from ``--key`` or the
+Typer-based, shipped as the optional ``cli`` extra:
+``pip install "aio17track[cli]"``. A thin layer over the public API: parse
+arguments, make the call, print. Human-readable lines by default; ``--json``
+emits machine-readable output. The API key comes from ``--key`` or the
 ``SEVENTEENTRACK_KEY`` environment variable.
 
 Exit codes: 0 success, 1 API/signature/lookup failure, 2 usage error.
 """
 
-import argparse
 import asyncio
 import dataclasses
 import json
-import os
 import sys
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Coroutine
 from datetime import datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+
+try:
+    import typer
+except ModuleNotFoundError as exc:  # pragma: no cover - exercised only sans extra
+    raise SystemExit(
+        "the aio17track CLI requires the 'cli' extra: "
+        'install with `pip install "aio17track[cli]"` (or `uv add "aio17track[cli]"`)'
+    ) from exc
 
 import aiohttp
 
@@ -40,24 +47,65 @@ from .webhook import parse_event, verify_signature
 
 _KEY_ENV_VAR = "SEVENTEENTRACK_KEY"
 
+app = typer.Typer(
+    name="aio17track",
+    help="Command-line client for the 17TRACK Tracking API v2.4.",
+    no_args_is_help=True,
+)
 
-class _UsageError(Exception):
-    """CLI-level usage problem (exit code 2)."""
+# --- shared parameter declarations ---
+
+_KeyOption = Annotated[
+    str | None,
+    typer.Option("--key", envvar=_KEY_ENV_VAR, show_envvar=True, help="17token API key"),
+]
+_JsonOption = Annotated[bool, typer.Option("--json", help="emit JSON output")]
+_CarrierOption = Annotated[int | None, typer.Option("--carrier", help="carrier code")]
+_EventsOption = Annotated[
+    bool, typer.Option("--events", help="print the full event history")
+]
+_NumbersArgument = Annotated[list[str], typer.Argument(help="tracking numbers")]
 
 
-def _resolve_key(args: argparse.Namespace) -> str:
-    if args.key:
-        return str(args.key)
-    key = os.environ.get(_KEY_ENV_VAR)
+# CLI-facing choice enums: the library enums' documented members minus the
+# UNKNOWN parse-fallback (a test pins these to the library tables).
+class _TrackingStatusChoice(StrEnum):
+    TRACKING = "Tracking"
+    STOPPED = "Stopped"
+
+
+class _PackageStatusChoice(StrEnum):
+    NOT_FOUND = "NotFound"
+    INFO_RECEIVED = "InfoReceived"
+    IN_TRANSIT = "InTransit"
+    EXPIRED = "Expired"
+    AVAILABLE_FOR_PICKUP = "AvailableForPickup"
+    OUT_FOR_DELIVERY = "OutForDelivery"
+    DELIVERY_FAILURE = "DeliveryFailure"
+    DELIVERED = "Delivered"
+    EXCEPTION = "Exception"
+
+
+def _require_key(key: str | None) -> str:
     if key:
         return key
-    raise _UsageError(
-        f"no API key: pass --key or set {_KEY_ENV_VAR} in the environment"
+    typer.echo(
+        f"error: no API key: pass --key or set {_KEY_ENV_VAR} in the environment",
+        err=True,
     )
+    raise typer.Exit(2)
 
 
-def _client(args: argparse.Namespace) -> Track17Client:
-    return Track17Client(_resolve_key(args))
+def _run[T](coro: Coroutine[Any, Any, T]) -> T:
+    """Run a client coroutine, mapping failures to CLI exit codes."""
+    try:
+        return asyncio.run(coro)
+    except ValueError as exc:  # client-side guards (filter caps, cache level, ...)
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    except Track17Error as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1) from exc
 
 
 # --- output helpers ---
@@ -118,11 +166,11 @@ def _format_number_carrier(item: NumberCarrier) -> str:
 
 
 def _print_batch[T](
-    args: argparse.Namespace, result: BatchResult[T], describe: Callable[[T], str]
-) -> int:
-    if args.json:
+    as_json: bool, result: BatchResult[T], describe: Callable[[T], str]
+) -> None:
+    if as_json:
         _emit_json(result)
-        return 0
+        return
     for item in result.accepted:
         print(f"accepted: {describe(item)}")
     for rejected in result.rejected:
@@ -130,297 +178,363 @@ def _print_batch[T](
             f"rejected: {rejected.number}  [{int(rejected.error_code)}] "
             f"{rejected.error_code.name}: {rejected.error_message}"
         )
-    return 0
-
-
-def _numbers(args: argparse.Namespace) -> list[NumberCarrier]:
-    return [NumberCarrier(number, carrier=args.carrier) for number in args.numbers]
 
 
 def _read_body(path: str) -> bytes:
     if path == "-":
         return sys.stdin.buffer.read()
-    return Path(path).read_bytes()
+    try:
+        return Path(path).read_bytes()
+    except OSError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
 
 
-# --- command handlers ---
+# --- commands ---
 
 
-async def _cmd_quota(args: argparse.Namespace) -> int:
-    async with _client(args) as client:
-        quota = await client.get_quota()
-    if args.json:
-        _emit_json(quota)
-        return 0
-    used = "?" if quota.used is None else quota.used
-    total = "?" if quota.total is None else quota.total
-    print(f"remaining={quota.remaining} used={used} total={total}")
-    return 0
+@app.command()
+def quota(key: _KeyOption = None, as_json: _JsonOption = False) -> None:
+    """Show the credit balance."""
+    api_key = _require_key(key)
+
+    async def call() -> Any:
+        async with Track17Client(api_key) as client:
+            return await client.get_quota()
+
+    result = _run(call())
+    if as_json:
+        _emit_json(result)
+        return
+    used = "?" if result.used is None else result.used
+    total = "?" if result.total is None else result.total
+    print(f"remaining={result.remaining} used={used} total={total}")
 
 
-async def _cmd_register(args: argparse.Namespace) -> int:
+@app.command()
+def register(
+    numbers: _NumbersArgument,
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+    carrier: _CarrierOption = None,
+    tag: Annotated[str | None, typer.Option("--tag")] = None,
+    order_no: Annotated[str | None, typer.Option("--order-no")] = None,
+    lang: Annotated[str | None, typer.Option("--lang")] = None,
+    param: Annotated[
+        str | None,
+        typer.Option(
+            "--param", help="extra carrier parameter (phone/zip), when the carrier requires it"
+        ),
+    ] = None,
+) -> None:
+    """Register numbers for tracking (1 credit each)."""
+    api_key = _require_key(key)
     registrations = [
         TrackRegistration(
-            number=number,
-            carrier=args.carrier,
-            tag=args.tag,
-            order_no=args.order_no,
-            lang=args.lang,
-            param=args.param,
+            number=number, carrier=carrier, tag=tag, order_no=order_no, lang=lang, param=param
         )
-        for number in args.numbers
+        for number in numbers
     ]
-    async with _client(args) as client:
-        result = await client.register(registrations)
-    return _print_batch(args, result, _format_registered)
+
+    async def call() -> BatchResult[RegisteredNumber]:
+        async with Track17Client(api_key) as client:
+            return await client.register(registrations)
+
+    _print_batch(as_json, _run(call()), _format_registered)
 
 
-async def _cmd_info(args: argparse.Namespace) -> int:
-    async with _client(args) as client:
-        result = await client.get_track_info(_numbers(args))
-    return _print_batch(
-        args, result, lambda info: _format_track_info(info, events=args.events)
-    )
+@app.command()
+def info(
+    numbers: _NumbersArgument,
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+    carrier: _CarrierOption = None,
+    events: _EventsOption = False,
+) -> None:
+    """Get tracking info for registered numbers."""
+    api_key = _require_key(key)
+    items = [NumberCarrier(number, carrier=carrier) for number in numbers]
+
+    async def call() -> BatchResult[TrackInfo]:
+        async with Track17Client(api_key) as client:
+            return await client.get_track_info(items)
+
+    _print_batch(as_json, _run(call()), lambda item: _format_track_info(item, events=events))
 
 
-async def _cmd_realtime(args: argparse.Namespace) -> int:
-    cache_level = CacheLevel.INSTANT if args.instant else CacheLevel.STANDARD
-    async with _client(args) as client:
-        result = await client.get_realtime_track_info(
-            _numbers(args), cache_level=cache_level
-        )
-    return _print_batch(
-        args, result, lambda info: _format_track_info(info, events=args.events)
-    )
+@app.command()
+def realtime(
+    numbers: _NumbersArgument,
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+    carrier: _CarrierOption = None,
+    events: _EventsOption = False,
+    instant: Annotated[
+        bool,
+        typer.Option(
+            "--instant",
+            help="INSTANT cache level: fresh carrier fetch, DEDUCTS 10 CREDITS PER NUMBER",
+        ),
+    ] = False,
+) -> None:
+    """Metered realtime lookup (1 credit per number; 10 with --instant)."""
+    api_key = _require_key(key)
+    items = [NumberCarrier(number, carrier=carrier) for number in numbers]
+    cache_level = CacheLevel.INSTANT if instant else CacheLevel.STANDARD
+
+    async def call() -> BatchResult[TrackInfo]:
+        async with Track17Client(api_key) as client:
+            return await client.get_realtime_track_info(items, cache_level=cache_level)
+
+    _print_batch(as_json, _run(call()), lambda item: _format_track_info(item, events=events))
 
 
-async def _cmd_list(args: argparse.Namespace) -> int:
-    async with _client(args) as client:
-        page = await client.get_track_list(
-            number_filter=args.number or None,
-            tracking_status=(
-                TrackingStatus(args.tracking_status) if args.tracking_status else None
-            ),
-            package_status=MainStatus(args.package_status) if args.package_status else None,
-            page_no=args.page,
-        )
-    if args.json:
-        _emit_json(page)
-        return 0
-    print(f"page {page.page_no}/{page.page_total} ({page.data_total} registrations total)")
-    for item in page.items:
+@app.command("list")
+def list_(
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+    number: Annotated[
+        list[str] | None, typer.Option("--number", help="filter by number (repeatable)")
+    ] = None,
+    tracking_status: Annotated[
+        _TrackingStatusChoice | None, typer.Option("--tracking-status")
+    ] = None,
+    package_status: Annotated[
+        _PackageStatusChoice | None, typer.Option("--package-status")
+    ] = None,
+    page: Annotated[int, typer.Option("--page")] = 1,
+) -> None:
+    """List registered numbers."""
+    api_key = _require_key(key)
+
+    async def call() -> Any:
+        async with Track17Client(api_key) as client:
+            return await client.get_track_list(
+                number_filter=number or None,
+                tracking_status=(
+                    TrackingStatus(tracking_status.value) if tracking_status else None
+                ),
+                package_status=MainStatus(package_status.value) if package_status else None,
+                page_no=page,
+            )
+
+    result = _run(call())
+    if as_json:
+        _emit_json(result)
+        return
+    print(f"page {result.page_no}/{result.page_total} ({result.data_total} registrations total)")
+    for item in result.items:
         print(f"  {_format_registered(item)}")
-    return 0
 
 
-async def _cmd_lifecycle(args: argparse.Namespace) -> int:
-    async with _client(args) as client:
-        method = getattr(client, args.client_method)
-        result: BatchResult[NumberCarrier] = await method(_numbers(args))
-    return _print_batch(args, result, _format_number_carrier)
+def _lifecycle(
+    client_method: str,
+    numbers: list[str],
+    carrier: int | None,
+    key: str | None,
+    as_json: bool,
+) -> None:
+    api_key = _require_key(key)
+    items = [NumberCarrier(number, carrier=carrier) for number in numbers]
+
+    async def call() -> BatchResult[NumberCarrier]:
+        async with Track17Client(api_key) as client:
+            method = getattr(client, client_method)
+            result: BatchResult[NumberCarrier] = await method(items)
+            return result
+
+    _print_batch(as_json, _run(call()), _format_number_carrier)
 
 
-async def _cmd_change_carrier(args: argparse.Namespace) -> int:
-    change = CarrierChange(number=args.number, carrier_old=args.old, carrier_new=args.new)
-    async with _client(args) as client:
-        result = await client.change_carrier([change])
-    return _print_batch(args, result, _format_number_carrier)
+@app.command()
+def stop(
+    numbers: _NumbersArgument,
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+    carrier: _CarrierOption = None,
+) -> None:
+    """Stop tracking numbers."""
+    _lifecycle("stop_track", numbers, carrier, key, as_json)
 
 
-async def _cmd_change_info(args: argparse.Namespace) -> int:
-    change = InfoChange(number=args.number, carrier=args.carrier, tag=args.tag)
-    async with _client(args) as client:
-        result = await client.change_info([change])
-    return _print_batch(args, result, _format_number_carrier)
+@app.command()
+def retrack(
+    numbers: _NumbersArgument,
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+    carrier: _CarrierOption = None,
+) -> None:
+    """Restart tracking for stopped numbers (once per number)."""
+    _lifecycle("retrack", numbers, carrier, key, as_json)
 
 
-async def _cmd_carriers(args: argparse.Namespace) -> int:
-    if args.search is None and args.code is None and args.name is None:
+@app.command()
+def delete(
+    numbers: _NumbersArgument,
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+    carrier: _CarrierOption = None,
+) -> None:
+    """Delete registrations (frees the slot)."""
+    _lifecycle("delete_track", numbers, carrier, key, as_json)
+
+
+@app.command("change-carrier")
+def change_carrier(
+    number: Annotated[str, typer.Argument()],
+    old: Annotated[int, typer.Option("--old", help="current carrier code")],
+    new: Annotated[int, typer.Option("--new", help="new carrier code")],
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+) -> None:
+    """Reassign a number to another carrier."""
+    api_key = _require_key(key)
+    change = CarrierChange(number=number, carrier_old=old, carrier_new=new)
+
+    async def call() -> BatchResult[NumberCarrier]:
+        async with Track17Client(api_key) as client:
+            return await client.change_carrier([change])
+
+    _print_batch(as_json, _run(call()), _format_number_carrier)
+
+
+@app.command("change-info")
+def change_info(
+    number: Annotated[str, typer.Argument()],
+    tag: Annotated[
+        str, typer.Option("--tag", help="new tag (the only field the API can change)")
+    ],
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+    carrier: _CarrierOption = None,
+) -> None:
+    """Change a registration's tag."""
+    api_key = _require_key(key)
+    change = InfoChange(number=number, carrier=carrier, tag=tag)
+
+    async def call() -> BatchResult[NumberCarrier]:
+        async with Track17Client(api_key) as client:
+            return await client.change_info([change])
+
+    _print_batch(as_json, _run(call()), _format_number_carrier)
+
+
+@app.command()
+def carriers(
+    search: Annotated[
+        str | None, typer.Option("--search", help="substring match on carrier names")
+    ] = None,
+    code: Annotated[
+        int | None, typer.Option("--code", help="look up the name for a carrier code")
+    ] = None,
+    name: Annotated[
+        str | None, typer.Option("--name", help="look up the code for a carrier name")
+    ] = None,
+    cache: Annotated[
+        Path | None, typer.Option("--cache", help="on-disk cache path for the carrier list")
+    ] = None,
+    as_json: _JsonOption = False,
+) -> None:
+    """Search the carrier catalog."""
+    if search is None and code is None and name is None:
         # Refuse to dump the multi-thousand-row catalog by accident.
-        raise _UsageError("carriers requires one of --search, --code, or --name")
-    catalog = CarrierCatalog(cache_path=args.cache)
-    async with aiohttp.ClientSession() as session:
-        await catalog.load(session)
-    if args.code is not None:
-        name = catalog.name(args.code)
-        if name is None:
-            print(f"no carrier with code {args.code}", file=sys.stderr)
-            return 1
-        print(json.dumps({"code": args.code, "name": name}) if args.json else name)
-        return 0
-    if args.name is not None:
-        code = catalog.code(args.name)
-        if code is None:
-            print(f"no carrier named {args.name!r}", file=sys.stderr)
-            return 1
-        print(json.dumps({"code": code, "name": args.name}) if args.json else code)
-        return 0
+        typer.echo("error: carriers requires one of --search, --code, or --name", err=True)
+        raise typer.Exit(2)
+
+    async def call() -> CarrierCatalog:
+        catalog = CarrierCatalog(cache_path=cache)
+        async with aiohttp.ClientSession() as session:
+            await catalog.load(session)
+        return catalog
+
+    catalog = _run(call())
+    if code is not None:
+        found_name = catalog.name(code)
+        if found_name is None:
+            typer.echo(f"no carrier with code {code}", err=True)
+            raise typer.Exit(1)
+        print(json.dumps({"code": code, "name": found_name}) if as_json else found_name)
+        return
+    if name is not None:
+        found_code = catalog.code(name)
+        if found_code is None:
+            typer.echo(f"no carrier named {name!r}", err=True)
+            raise typer.Exit(1)
+        print(json.dumps({"code": found_code, "name": name}) if as_json else found_code)
+        return
+    assert search is not None
     matches = {
-        code: name
-        for code, name in catalog.all().items()
-        if args.search.casefold() in name.casefold()
+        carrier_code: carrier_name
+        for carrier_code, carrier_name in catalog.all().items()
+        if search.casefold() in carrier_name.casefold()
     }
-    if args.json:
+    if as_json:
         _emit_json(matches)
-        return 0 if matches else 1
-    for code, name in sorted(matches.items(), key=lambda pair: pair[1].casefold()):
-        print(f"{code}\t{name}")
+        if not matches:
+            raise typer.Exit(1)
+        return
+    for carrier_code, carrier_name in sorted(matches.items(), key=lambda pair: pair[1].casefold()):
+        print(f"{carrier_code}\t{carrier_name}")
     if not matches:
-        print(f"no carriers matching {args.search!r}", file=sys.stderr)
-        return 1
-    return 0
+        typer.echo(f"no carriers matching {search!r}", err=True)
+        raise typer.Exit(1)
 
 
-async def _cmd_webhook_verify(args: argparse.Namespace) -> int:
-    body = _read_body(args.body)
+@app.command("webhook-verify")
+def webhook_verify(
+    sign: Annotated[str, typer.Option("--sign", help="value of the webhook's sign header")],
+    body: Annotated[
+        str, typer.Option("--body", help="path to the raw body ('-' for stdin)")
+    ] = "-",
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+) -> None:
+    """Verify a webhook signature over the raw body bytes."""
+    api_key = _require_key(key)
+    raw = _read_body(body)
     try:
-        verify_signature(body, args.sign, _resolve_key(args))
+        verify_signature(raw, sign, api_key)
     except SignatureError:
-        if args.json:
+        if as_json:
             _emit_json({"valid": False})
         else:
-            print("signature INVALID", file=sys.stderr)
-        return 1
-    if args.json:
+            typer.echo("signature INVALID", err=True)
+        raise typer.Exit(1) from None
+    if as_json:
         _emit_json({"valid": True})
     else:
         print("signature ok")
-    return 0
 
 
-async def _cmd_webhook_parse(args: argparse.Namespace) -> int:
-    event = parse_event(_read_body(args.body))
-    if args.json:
+@app.command("webhook-parse")
+def webhook_parse(
+    body: Annotated[
+        str, typer.Option("--body", help="path to the raw body ('-' for stdin)")
+    ] = "-",
+    as_json: _JsonOption = False,
+    events: _EventsOption = False,
+) -> None:
+    """Parse a webhook body into a typed event."""
+    raw = _read_body(body)
+    try:
+        event = parse_event(raw)
+    except Track17Error as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    if as_json:
         _emit_json(event)
-        return 0
+        return
     print(event.event)
     if isinstance(event.data, TrackInfo):
-        print(_format_track_info(event.data, events=args.events))
+        print(_format_track_info(event.data, events=events))
     else:
         print(f"{event.data.number} (carrier {event.data.carrier}) tag={event.data.tag or '-'}")
-    return 0
 
 
-# --- parser ---
-
-
-def _build_parser() -> argparse.ArgumentParser:
-    common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--key", help="17token API key (default: $SEVENTEENTRACK_KEY)")
-    common.add_argument("--json", action="store_true", help="emit JSON output")
-
-    parser = argparse.ArgumentParser(
-        prog="aio17track",
-        description="Command-line client for the 17TRACK Tracking API v2.4.",
-    )
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    def command(
-        name: str,
-        handler: Callable[[argparse.Namespace], Any],
-        help_text: str,
-    ) -> argparse.ArgumentParser:
-        sub = subparsers.add_parser(name, parents=[common], help=help_text)
-        sub.set_defaults(handler=handler)
-        return sub
-
-    sub = command("quota", _cmd_quota, "show the credit balance")
-
-    sub = command("register", _cmd_register, "register numbers for tracking (1 credit each)")
-    sub.add_argument("numbers", nargs="+")
-    sub.add_argument("--carrier", type=int, help="carrier code (omit to auto-detect)")
-    sub.add_argument("--tag")
-    sub.add_argument("--order-no")
-    sub.add_argument("--lang")
-    sub.add_argument(
-        "--param", help="extra carrier parameter (phone/zip), when the carrier requires it"
-    )
-
-    sub = command("info", _cmd_info, "get tracking info for registered numbers")
-    sub.add_argument("numbers", nargs="+")
-    sub.add_argument("--carrier", type=int)
-    sub.add_argument("--events", action="store_true", help="print the full event history")
-
-    sub = command(
-        "realtime",
-        _cmd_realtime,
-        "metered realtime lookup (1 credit per number; 10 with --instant)",
-    )
-    sub.add_argument("numbers", nargs="+")
-    sub.add_argument("--carrier", type=int)
-    sub.add_argument("--events", action="store_true")
-    sub.add_argument(
-        "--instant",
-        action="store_true",
-        help="INSTANT cache level: fresh carrier fetch, DEDUCTS 10 CREDITS PER NUMBER",
-    )
-
-    sub = command("list", _cmd_list, "list registered numbers")
-    sub.add_argument("--number", action="append", help="filter by number (repeatable)")
-    sub.add_argument(
-        "--tracking-status",
-        choices=sorted(m.value for m in TrackingStatus if not m.is_unknown),
-    )
-    sub.add_argument(
-        "--package-status",
-        choices=sorted(m.value for m in MainStatus if not m.is_unknown),
-    )
-    sub.add_argument("--page", type=int, default=1)
-
-    for name, client_method, help_text in (
-        ("stop", "stop_track", "stop tracking numbers"),
-        ("retrack", "retrack", "restart tracking for stopped numbers (once per number)"),
-        ("delete", "delete_track", "delete registrations (frees the slot)"),
-    ):
-        sub = command(name, _cmd_lifecycle, help_text)
-        sub.set_defaults(client_method=client_method)
-        sub.add_argument("numbers", nargs="+")
-        sub.add_argument("--carrier", type=int)
-
-    sub = command("change-carrier", _cmd_change_carrier, "reassign a number to another carrier")
-    sub.add_argument("number")
-    sub.add_argument("--old", type=int, required=True, help="current carrier code")
-    sub.add_argument("--new", type=int, required=True, help="new carrier code")
-
-    sub = command("change-info", _cmd_change_info, "change a registration's tag")
-    sub.add_argument("number")
-    sub.add_argument("--tag", required=True, help="new tag (the only field the API can change)")
-    sub.add_argument("--carrier", type=int)
-
-    sub = command("carriers", _cmd_carriers, "search the carrier catalog")
-    sub.add_argument("--search", help="substring match on carrier names")
-    sub.add_argument("--code", type=int, help="look up the name for a carrier code")
-    sub.add_argument("--name", help="look up the code for a carrier name")
-    sub.add_argument("--cache", type=Path, help="on-disk cache path for the carrier list")
-
-    sub = command("webhook-verify", _cmd_webhook_verify, "verify a webhook signature")
-    sub.add_argument("--sign", required=True, help="value of the webhook's sign header")
-    sub.add_argument("--body", default="-", help="path to the raw body ('-' for stdin)")
-
-    sub = command("webhook-parse", _cmd_webhook_parse, "parse a webhook body")
-    sub.add_argument("--body", default="-", help="path to the raw body ('-' for stdin)")
-    sub.add_argument("--events", action="store_true")
-
-    return parser
-
-
-def main(argv: Sequence[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
-    try:
-        return int(asyncio.run(args.handler(args)))
-    except _UsageError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    except ValueError as exc:  # client-side guards (filter caps, cache level, ...)
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    except OSError as exc:  # unreadable --body / --cache paths
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
-    except Track17Error as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+def main() -> None:
+    """Console-script entry point."""
+    app()
 
 
 if __name__ == "__main__":  # pragma: no cover
-    sys.exit(main())
+    main()
