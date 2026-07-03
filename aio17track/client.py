@@ -70,13 +70,16 @@ def _carrier_change_payload(item: CarrierChange) -> dict[str, object]:
 
 
 def _info_change_payload(item: InfoChange) -> dict[str, object]:
-    payload: dict[str, object] = {"number": item.number}
+    # changeinfo nests the fields being changed under "items"; only
+    # number/carrier identify the registration at the top level.
+    items: dict[str, object] = {}
+    if item.tag is not None:
+        items["tag"] = item.tag
+    if item.order_no is not None:
+        items["order_no"] = item.order_no
+    payload: dict[str, object] = {"number": item.number, "items": items}
     if item.carrier is not None:
         payload["carrier"] = item.carrier
-    if item.tag is not None:
-        payload["tag"] = item.tag
-    if item.order_no is not None:
-        payload["order_no"] = item.order_no
     return payload
 
 

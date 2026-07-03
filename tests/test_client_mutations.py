@@ -181,7 +181,9 @@ async def test_change_carrier_payload_and_parse() -> None:
     assert result.accepted == (NumberCarrier("AA123456789BR", carrier=190012),)
 
 
-async def test_change_info_payload_omits_unset_fields() -> None:
+async def test_change_info_nests_updates_under_items() -> None:
+    """The changeinfo wire shape: number/carrier identify the registration
+    at the top level; the fields being changed go inside "items"."""
     async with Track17Client("test-key") as client:
         with aioresponses() as mocked:
             mocked.post(_url("changeinfo"), callback=_echo_accepted)
@@ -193,8 +195,8 @@ async def test_change_info_payload_omits_unset_fields() -> None:
             )
             sent = _sent_json(_calls(mocked, "changeinfo")[0])
     assert sent == [
-        {"number": "AA123456789BR", "carrier": 2151, "tag": "new-tag"},
-        {"number": "YT26169", "order_no": "86574382938"},
+        {"number": "AA123456789BR", "carrier": 2151, "items": {"tag": "new-tag"}},
+        {"number": "YT26169", "items": {"order_no": "86574382938"}},
     ]
 
 
