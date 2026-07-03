@@ -14,7 +14,8 @@
 | `webhook_tracking_stopped.json` | `TRACKING_STOPPED` webhook payload (verbatim doc example) |
 
 **Provenance:** synthetic, shaped field-for-field after the official v2.4 doc
-examples (captured 2026-07-03). Replace with real captured responses
-(Correios 2151, YanWen 190012, an Exception_Returning payload) before M3,
-per SPEC §11. A recorded raw webhook body + its real `sign` header is still
-needed for the M5 byte-exact signature tests.
+examples (captured 2026-07-03). Swap in real captured responses
+(Correios 2151, YanWen 190012, an Exception_Returning payload) when a live
+account is available — the opt-in live suite (`pytest -m live`) is the
+natural capture point. A recorded raw webhook body + its real `sign` header
+would also upgrade the signature tests from doc-derived to byte-exact-real.

@@ -103,15 +103,19 @@ class Track17Client:
         endpoint: str,
         payloads: Sequence[dict[str, object]],
         parse: Callable[[dict[str, Any]], R],
+        *,
+        chunk_size: int = _BATCH_LIMIT,
     ) -> BatchResult[R]:
-        """Dispatch ``payloads`` in chunks of 40 and merge into one result.
+        """Dispatch ``payloads`` in chunks and merge into one result.
 
         Chunks go through the transport throttle sequentially; accepted and
         rejected items are concatenated across chunks in dispatch order.
         """
+        if chunk_size < 1:
+            raise ValueError(f"chunk_size must be >= 1, got {chunk_size}")
         accepted: list[R] = []
         rejected: list[RejectedItem] = []
-        for chunk in _chunk(payloads):
+        for chunk in _chunk(payloads, chunk_size):
             data = await self._transport.request(endpoint, list(chunk))
             accepted.extend(parse(item) for item in data.get("accepted") or [])
             rejected.extend(RejectedItem.from_api(item) for item in data.get("rejected") or [])
@@ -216,11 +220,34 @@ class Track17Client:
     ) -> BatchResult[TrackInfo]:
         """Metered realtime lookup.
 
-        Warning: ``CacheLevel.INSTANT`` deducts 10 credits per call
+        Warning: ``CacheLevel.INSTANT`` deducts 10 credits **per number**
         (``CacheLevel.STANDARD`` deducts 1). INSTANT is never the default
         and must be opted into explicitly.
+
+        The realtime endpoint accepts a single number per request, so each
+        item is dispatched as its own throttled call and the results are
+        merged into one ``BatchResult``.
         """
-        raise NotImplementedError  # M6
+        if cache_level not in (CacheLevel.STANDARD, CacheLevel.INSTANT):
+            raise ValueError(
+                "cache_level must be CacheLevel.STANDARD or CacheLevel.INSTANT"
+            )
+        payloads: list[dict[str, object]] = []
+        for item in items:
+            payload = _number_carrier_payload(item)
+            if cache_level is CacheLevel.INSTANT:
+                # The docs contradict themselves on the cacheLevel wire value
+                # (prose: "Standard"/"Instant" strings; table: int 0/1).
+                # STANDARD omits the field entirely — it is the documented
+                # default — so the ambiguity only touches explicit INSTANT.
+                payload["cacheLevel"] = CacheLevel.INSTANT.value
+            payloads.append(payload)
+        return await self._batched(
+            "getRealTimeTrackInfo",
+            payloads,
+            TrackInfo.from_api,
+            chunk_size=1,  # documented limit: one tracking number per request
+        )
 
     async def close(self) -> None:
         """Close only a client-owned session (never an injected one)."""

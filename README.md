@@ -4,11 +4,8 @@ Dependency-light, fully typed async Python client for the
 [17TRACK Tracking API v2.4](https://api.17track.net/). One façade
 (`Track17Client`) wraps every v2.4 endpoint with built-in 3 req/s
 throttling, automatic 40-number batching, frozen-dataclass models, a typed
-error taxonomy, and standalone webhook signature verification. The only
-runtime dependency is `aiohttp`.
-
-> **Status:** milestone M0 — typed scaffolding only. Signatures are final
-> per [SPEC.md](SPEC.md); function bodies are not implemented yet.
+error taxonomy, standalone webhook signature verification, and a carrier
+code catalog. The only runtime dependency is `aiohttp`.
 
 ## Install
 
@@ -49,10 +46,68 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-> **Warning — metered call:** `get_realtime_track_info` with
-> `cache_level=CacheLevel.INSTANT` deducts **10 credits per call**
-> (`CacheLevel.STANDARD` deducts 1). `INSTANT` is never the default and
-> must be opted into explicitly.
+Batch calls accept any number of items — the client chunks to the API's
+40-number limit internally and paces requests at 3/s, so callers never
+handle rate limits themselves. Partial success is data, not an exception:
+every batch returns a `BatchResult` with `accepted` and `rejected` sides
+(`result.already_registered` filters the rejection that usually means
+"fine, carry on").
+
+### Webhooks
+
+Verification runs over the **raw request bytes** — pass them straight
+through, never re-serialize:
+
+```python
+from aio17track import parse_event, verify_signature
+
+verify_signature(raw_body, request.headers["sign"], "your-17token-api-key")
+event = parse_event(raw_body)  # TrackInfo or StoppedNotice in event.data
+```
+
+### Carrier names
+
+```python
+from aio17track.carriers import CarrierCatalog
+
+catalog = CarrierCatalog()          # optional: cache_path=Path("carriers.json")
+await catalog.load(session)
+catalog.name(2151)                  # "Correios"
+catalog.code("correios")            # 2151
+```
+
+### Realtime lookups (metered)
+
+> **Warning — credits:** `get_realtime_track_info` deducts credits per
+> number: 1 with the default `CacheLevel.STANDARD`, **10 with
+> `CacheLevel.INSTANT`**. INSTANT is never the default and must be opted
+> into explicitly.
+
+```python
+fresh = await client.get_realtime_track_info(
+    [NumberCarrier("RR123456789BR", carrier=2151)],
+    # cache_level=CacheLevel.INSTANT  # only if you accept the 10-credit cost
+)
+```
+
+## Errors
+
+Request-level failures raise (`AuthenticationError`, `RateLimitError`,
+`QuotaExhaustedError`, `Track17ConnectionError`, `Track17APIError`,
+`SignatureError` — all under `Track17Error`). Per-item rejections never
+raise; they arrive typed in `BatchResult.rejected` keyed by `ErrorCode`.
+Unknown statuses and error codes never crash parsing: enums fall back to
+an `UNKNOWN` member carrying the raw value.
+
+## Development
+
+```sh
+uv sync
+uv run ruff check .
+uv run mypy --strict aio17track tests
+uv run pytest                                        # unit + property suites
+SEVENTEENTRACK_LIVE_KEY=<key> uv run pytest -m live  # opt-in, costs 1 credit
+```
 
 ## License
 
