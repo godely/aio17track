@@ -466,8 +466,8 @@ def carriers(
 ) -> None:
     """Search the carrier catalog.
 
-    The carrier list is cached in the aio17track app directory and
-    refetched automatically once the copy is older than 7 days.
+    By default the carrier list is cached in the aio17track app directory
+    and refetched automatically once the copy is older than 7 days.
     """
     if search is None and code is None and name is None:
         # Refuse to dump the multi-thousand-row catalog by accident.
