@@ -305,6 +305,26 @@ def test_carriers_refresh_forces_a_fetch(default_cache_path: Path) -> None:
     assert json.loads(default_cache_path.read_text()) == _CARRIER_SAMPLE
 
 
+@pytest.mark.parametrize("blocker", ["file-parent", "dir-as-cache"])
+def test_carriers_unusable_default_cache_is_best_effort(
+    default_cache_path: Path, blocker: str
+) -> None:
+    """A broken app dir must never break a network-only lookup: the lookup
+    still succeeds (with a warning), it just runs uncached. Only an explicit
+    --cache path is a hard usage error."""
+    if blocker == "file-parent":
+        default_cache_path.parent.parent.mkdir(parents=True, exist_ok=True)
+        default_cache_path.parent.write_text("not a directory")  # mkdir fails
+    else:
+        default_cache_path.mkdir(parents=True)  # cache read/write fails
+    with aioresponses() as mocked:
+        mocked.get(_CARRIER_LIST_URL, payload=_CARRIER_SAMPLE)
+        result = runner.invoke(app, ["carriers", "--code", "2151"])
+    assert result.exit_code == 0
+    assert "Correios" in result.stdout
+    assert "warning: carrier cache unavailable" in result.stderr
+
+
 def test_carriers_default_cache_path_lives_in_the_app_dir() -> None:
     expected = Path(typer.get_app_dir("aio17track")) / "carriers.json"
     assert _real_default_carrier_cache_path() == expected

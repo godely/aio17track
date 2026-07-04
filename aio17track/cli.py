@@ -480,17 +480,30 @@ def carriers(
             err=True,
         )
 
-    async def call() -> CarrierCatalog:
-        cache_path = cache
-        if cache_path is None:
-            cache_path = _default_carrier_cache_path()
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-        if refresh or _carrier_cache_is_stale(cache_path):
+    async def _load(session: aiohttp.ClientSession, cache_path: Path | None) -> CarrierCatalog:
+        if cache_path is not None and (refresh or _carrier_cache_is_stale(cache_path)):
             cache_path.unlink(missing_ok=True)
         catalog = CarrierCatalog(cache_path=cache_path)
-        async with aiohttp.ClientSession() as session:
-            await catalog.load(session)
+        await catalog.load(session)
         return catalog
+
+    async def call() -> CarrierCatalog:
+        async with aiohttp.ClientSession() as session:
+            if cache is not None:
+                # An explicit path is a contract: failures stay usage errors.
+                return await _load(session, cache)
+            # The default cache is best-effort: an unusable app dir (read-only
+            # home, containers) must never break a network-only lookup.
+            try:
+                default = _default_carrier_cache_path()
+                default.parent.mkdir(parents=True, exist_ok=True)
+                return await _load(session, default)
+            except OSError as exc:
+                typer.echo(
+                    f"warning: carrier cache unavailable ({exc}); continuing without it",
+                    err=True,
+                )
+                return await _load(session, None)
 
     catalog = _run(call())
     if code is not None:
