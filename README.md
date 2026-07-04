@@ -122,6 +122,14 @@ Add `--json` after any subcommand for machine-readable output. Exit codes:
 `0` success (including partial success — check the `rejected:` lines),
 `1` API failure, `2` usage error.
 
+`carriers` keeps a local copy of the carrier list in the per-user app
+directory (`~/.config/aio17track/carriers.json` on Linux) and refetches it
+automatically once the copy is older than 7 days. Pass `--refresh` to force
+a fresh download sooner. The cache is best-effort: if the app directory
+isn't writable, lookups still work (uncached, with a warning). The old
+`--cache PATH` override still works but is deprecated — the cache is on by
+default now.
+
 ## Errors
 
 Request-level failures raise (`AuthenticationError`, `RateLimitError`,
