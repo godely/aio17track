@@ -322,28 +322,36 @@ def list_(
     package_status: Annotated[
         _PackageStatusChoice | None, typer.Option("--package-status")
     ] = None,
-    page: Annotated[int, typer.Option("--page")] = 1,
 ) -> None:
     """List registered numbers."""
     api_key = _require_key(key)
 
-    async def call() -> Any:
+    async def call() -> list[RegisteredNumber]:
+        # The API pages at 40 registrations; walk every page so pagination
+        # stays a wire detail (the client already throttles to 3 req/s).
         async with Track17Client(api_key) as client:
-            return await client.get_track_list(
-                number_filter=number or None,
-                tracking_status=(
-                    TrackingStatus(tracking_status.value) if tracking_status else None
-                ),
-                package_status=MainStatus(package_status.value) if package_status else None,
-                page_no=page,
-            )
+            registrations: list[RegisteredNumber] = []
+            page_no = 1
+            while True:
+                page = await client.get_track_list(
+                    number_filter=number or None,
+                    tracking_status=(
+                        TrackingStatus(tracking_status.value) if tracking_status else None
+                    ),
+                    package_status=MainStatus(package_status.value) if package_status else None,
+                    page_no=page_no,
+                )
+                registrations.extend(page.items)
+                if page.page_no >= page.page_total:
+                    return registrations
+                page_no = page.page_no + 1
 
-    result = _run(call())
+    registrations = _run(call())
     if as_json:
-        _emit_json(result)
+        _emit_json(registrations)
         return
-    print(f"page {result.page_no}/{result.page_total} ({result.data_total} registrations total)")
-    for item in result.items:
+    print(f"{len(registrations)} registrations")
+    for item in registrations:
         print(f"  {_format_registered(item)}")
 
 
@@ -402,17 +410,38 @@ def delete(
 @app.command("change-carrier")
 def change_carrier(
     number: Annotated[str, typer.Argument()],
-    old: Annotated[int, typer.Option("--old", help="current carrier code")],
     new: Annotated[int, typer.Option("--new", help="new carrier code")],
+    old: Annotated[
+        int | None,
+        typer.Option("--old", help="current carrier code (looked up automatically if omitted)"),
+    ] = None,
     key: _KeyOption = None,
     as_json: _JsonOption = False,
 ) -> None:
     """Reassign a number to another carrier."""
     api_key = _require_key(key)
-    change = CarrierChange(number=number, carrier_old=old, carrier_new=new)
 
     async def call() -> BatchResult[NumberCarrier]:
         async with Track17Client(api_key) as client:
+            carrier_old = old
+            if carrier_old is None:
+                # carrier_old exists only to disambiguate, so resolve it from
+                # the registration instead of making the user look it up.
+                listed = await client.get_track_list(number_filter=[number])
+                codes = sorted({item.carrier for item in listed.items if item.number == number})
+                if not codes:
+                    typer.echo(f"error: {number} is not registered", err=True)
+                    raise typer.Exit(1)
+                if len(codes) > 1:
+                    typer.echo(
+                        f"error: {number} is registered under several carriers "
+                        f"({', '.join(str(code) for code in codes)}); "
+                        "pass --old to pick one",
+                        err=True,
+                    )
+                    raise typer.Exit(2)
+                carrier_old = codes[0]
+            change = CarrierChange(number=number, carrier_old=carrier_old, carrier_new=new)
             return await client.change_carrier([change])
 
     _print_batch(as_json, _run(call()), _format_number_carrier)

@@ -161,16 +161,36 @@ def test_realtime_instant_requires_explicit_flag() -> None:
 
 
 def test_list_with_filters(load_fixture: Any) -> None:
+    payload = load_fixture("gettracklist_page")
+    payload["page"].update(page_total=1, data_total=2)  # single page: no follow-up fetch
     with aioresponses() as mocked:
-        mocked.post(f"{_BASE}/gettracklist", payload=load_fixture("gettracklist_page"))
-        result = runner.invoke(
-            app, ["list", "--tracking-status", "Tracking", "--page", "1", "--key", "k"]
-        )
+        mocked.post(f"{_BASE}/gettracklist", payload=payload)
+        result = runner.invoke(app, ["list", "--tracking-status", "Tracking", "--key", "k"])
         sent = _sent_json(mocked, "gettracklist")
     assert result.exit_code == 0
     assert sent == {"page_no": 1, "tracking_status": "Tracking"}
-    assert "page 1/2 (43 registrations total)" in result.stdout
+    assert "2 registrations" in result.stdout
     assert "AA123456789BR (carrier 2151)  Tracking / Delivered" in result.stdout
+
+
+def test_list_fetches_every_page(load_fixture: Any) -> None:
+    """`list` walks gettracklist to the last page; --page is not a CLI concern."""
+    page_one = load_fixture("gettracklist_page")  # reports page 1/2
+    page_two = load_fixture("gettracklist_page")
+    page_two["page"].update(page_no=2)
+    page_two["data"]["accepted"] = [
+        dict(page_two["data"]["accepted"][0], number="BB987654321BR")
+    ]
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/gettracklist", payload=page_one)
+        mocked.post(f"{_BASE}/gettracklist", payload=page_two)
+        result = runner.invoke(app, ["list", "--key", "k"])
+        calls = mocked.requests[("POST", URL(f"{_BASE}/gettracklist"))]
+    assert result.exit_code == 0
+    assert [call.kwargs["json"]["page_no"] for call in calls] == [1, 2]
+    assert "3 registrations" in result.stdout
+    assert "AA123456789BR" in result.stdout
+    assert "BB987654321BR" in result.stdout
 
 
 def test_list_rejects_invalid_status_choice() -> None:
@@ -221,8 +241,56 @@ def test_change_carrier_payload() -> None:
             ],
         )
         sent = _sent_json(mocked, "changecarrier")
+        assert ("POST", URL(f"{_BASE}/gettracklist")) not in mocked.requests  # no lookup
     assert result.exit_code == 0
     assert sent == [{"number": "AA123456789BR", "carrier_old": 2151, "carrier_new": 190012}]
+
+
+def test_change_carrier_resolves_old_carrier_when_omitted(load_fixture: Any) -> None:
+    """Without --old the CLI looks the number up and fills carrier_old itself."""
+    payload = load_fixture("gettracklist_page")
+    payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/gettracklist", payload=payload)
+        mocked.post(f"{_BASE}/changecarrier", callback=_echo_accepted)
+        result = runner.invoke(
+            app, ["change-carrier", "AA123456789BR", "--new", "190012", "--key", "k"]
+        )
+        looked_up = _sent_json(mocked, "gettracklist")
+        sent = _sent_json(mocked, "changecarrier")
+    assert result.exit_code == 0
+    assert looked_up == {"page_no": 1, "number": "AA123456789BR"}
+    assert sent == [{"number": "AA123456789BR", "carrier_old": 2151, "carrier_new": 190012}]
+
+
+def test_change_carrier_ambiguous_number_needs_explicit_old(load_fixture: Any) -> None:
+    """A number registered under several carriers exits 2, listing the codes."""
+    payload = load_fixture("gettracklist_page")
+    row = payload["data"]["accepted"][0]
+    payload["data"]["accepted"] = [dict(row, carrier=2151), dict(row, carrier=190012)]
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/gettracklist", payload=payload)
+        result = runner.invoke(
+            app, ["change-carrier", "AA123456789BR", "--new", "100003", "--key", "k"]
+        )
+        assert ("POST", URL(f"{_BASE}/changecarrier")) not in mocked.requests
+    assert result.exit_code == 2
+    assert "--old" in result.stderr
+    assert "2151" in result.stderr
+    assert "190012" in result.stderr
+
+
+def test_change_carrier_unregistered_number_exits_1(load_fixture: Any) -> None:
+    payload = load_fixture("gettracklist_page")
+    payload["data"]["accepted"] = []
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/gettracklist", payload=payload)
+        result = runner.invoke(
+            app, ["change-carrier", "ZZ000000000XX", "--new", "190012", "--key", "k"]
+        )
+        assert ("POST", URL(f"{_BASE}/changecarrier")) not in mocked.requests
+    assert result.exit_code == 1
+    assert "not registered" in result.stderr
 
 
 def test_change_info_requires_tag() -> None:
