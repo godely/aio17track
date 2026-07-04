@@ -379,8 +379,9 @@ Two long-lived branches:
 
 Current deviations on `dev`:
 
-- **CLI (M7).** An `argparse`-based command-line interface (`aio17track`
-  console script + `python -m aio17track`) covering every client method,
-  carrier lookups, and webhook verify/parse. Stdlib-only, so the §3
-  dependency policy holds; the library's public API surface is unchanged.
-  Supersedes §1's "no CLI" only on `dev`.
+- **CLI (M7).** A [Typer](https://typer.tiangolo.com/)-based command-line
+  interface (`aio17track` console script + `python -m aio17track`) covering
+  every client method, carrier lookups, and webhook verify/parse. Shipped
+  as an **optional extra** — `pip install "aio17track[cli]"` — so a base
+  install still honors the §3 aiohttp-only dependency policy; the library's
+  public API surface is unchanged. Supersedes §1's "no CLI" only on `dev`.
