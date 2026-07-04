@@ -236,6 +236,18 @@ def test_carriers_unknown_code_exits_1() -> None:
     assert "no carrier" in result.stderr
 
 
+def test_carriers_unusable_cache_path_is_a_usage_error(tmp_path: Path) -> None:
+    """--cache pointing at a directory maps to exit 2, not a traceback
+    (parity with the argparse CLI's OSError handling)."""
+    with aioresponses() as mocked:
+        mocked.get(_CARRIER_LIST_URL, payload=[{"key": 2151, "_name": "Correios"}])
+        result = runner.invoke(
+            app, ["carriers", "--search", "corr", "--cache", str(tmp_path)]
+        )
+    assert result.exit_code == 2
+    assert "error:" in result.stderr
+
+
 def test_carriers_without_flags_is_a_usage_error() -> None:
     """Refuses to dump the full multi-thousand-row catalog; no fetch happens."""
     with aioresponses() as mocked:

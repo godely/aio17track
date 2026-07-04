@@ -103,6 +103,9 @@ def _run[T](coro: Coroutine[Any, Any, T]) -> T:
     except ValueError as exc:  # client-side guards (filter caps, cache level, ...)
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(2) from exc
+    except OSError as exc:  # unreadable/unwritable local paths (e.g. carriers --cache)
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
     except Track17Error as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(1) from exc
