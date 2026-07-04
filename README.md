@@ -101,11 +101,15 @@ uv tool install "aio17track[cli]"   # or: pip install "aio17track[cli]"
 ```
 
 Run it as `aio17track` (or `python -m aio17track`). Every command has rich
-`--help`; shell completion comes via `aio17track --install-completion`. The
-key comes from `--key` or `$SEVENTEENTRACK_KEY`:
+`--help`; shell completion comes via `aio17track --install-completion`.
+Log in once and the key is stored (permissions `0600`) in the per-user app
+directory — no flag or environment variable needed afterwards. `--key` and
+`$SEVENTEENTRACK_KEY` still work and take precedence, for scripts and CI:
 
 ```sh
-export SEVENTEENTRACK_KEY="your-17token"
+aio17track auth login     # prompts for the key, verifies it, stores it
+aio17track auth status    # which key would be used, and from where
+aio17track auth logout    # delete the stored key
 
 aio17track quota
 aio17track register RR123456789BR --carrier 2151 --tag my-order

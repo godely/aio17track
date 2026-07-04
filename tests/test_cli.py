@@ -24,9 +24,10 @@ from aio17track.cli import app
 
 _BASE = "https://api.17track.net/track/v2.4"
 
-# Captured before the autouse fixture below patches it, so the real
-# app-dir derivation stays testable.
+# Captured before the autouse fixtures below patch them, so the real
+# app-dir derivations stay testable.
 _real_default_carrier_cache_path = cli._default_carrier_cache_path
+_real_stored_key_path = cli._stored_key_path
 
 runner = CliRunner()
 
@@ -55,6 +56,15 @@ def default_cache_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return path
 
 
+@pytest.fixture(autouse=True)
+def stored_key_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the stored-key file into tmp_path so tests never read a real
+    key saved by `auth login` on the developer's machine."""
+    path = tmp_path / "app-dir" / "api-key"
+    monkeypatch.setattr(cli, "_stored_key_path", lambda: path)
+    return path
+
+
 # --- key resolution / usage errors ---
 
 
@@ -62,6 +72,7 @@ def test_missing_key_is_a_usage_error() -> None:
     result = runner.invoke(app, ["quota"])
     assert result.exit_code == 2
     assert "SEVENTEENTRACK_KEY" in result.stderr
+    assert "auth login" in result.stderr
 
 
 def test_key_from_environment(
@@ -80,6 +91,118 @@ def test_key_from_environment(
 def test_unknown_command_exits_2() -> None:
     result = runner.invoke(app, ["frobnicate"])
     assert result.exit_code == 2
+
+
+# --- auth ---
+
+
+def test_auth_login_verifies_and_stores_the_key(
+    stored_key_path: Path, load_fixture: Any
+) -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/getquota", payload=load_fixture("getquota"))
+        result = runner.invoke(app, ["auth", "login", "--key", "sk-fresh"])
+        headers = mocked.requests[("POST", URL(f"{_BASE}/getquota"))][0].kwargs["headers"]
+    assert result.exit_code == 0
+    assert headers["17token"] == "sk-fresh"  # verified against the API before storing
+    assert stored_key_path.read_text() == "sk-fresh\n"
+    assert stored_key_path.stat().st_mode & 0o777 == 0o600
+    assert "saved" in result.stdout
+
+
+def test_auth_login_prompts_when_key_omitted(
+    stored_key_path: Path, load_fixture: Any
+) -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/getquota", payload=load_fixture("getquota"))
+        result = runner.invoke(app, ["auth", "login"], input="sk-typed\n")
+    assert result.exit_code == 0
+    assert stored_key_path.read_text() == "sk-typed\n"
+    assert "sk-typed" not in result.stdout  # hidden input never echoes
+
+
+def test_auth_login_rejected_key_is_not_stored(stored_key_path: Path) -> None:
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/getquota", status=401)
+        result = runner.invoke(app, ["auth", "login", "--key", "sk-bad"])
+    assert result.exit_code == 1
+    assert not stored_key_path.exists()
+
+
+def test_stored_key_is_used_when_no_flag_or_env(
+    stored_key_path: Path, load_fixture: Any
+) -> None:
+    stored_key_path.parent.mkdir(parents=True)
+    stored_key_path.write_text("sk-stored\n")
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/getquota", payload=load_fixture("getquota"))
+        result = runner.invoke(app, ["quota"])
+        headers = mocked.requests[("POST", URL(f"{_BASE}/getquota"))][0].kwargs["headers"]
+    assert result.exit_code == 0
+    assert headers["17token"] == "sk-stored"
+
+
+def test_env_var_beats_stored_key(
+    monkeypatch: pytest.MonkeyPatch, stored_key_path: Path, load_fixture: Any
+) -> None:
+    stored_key_path.parent.mkdir(parents=True)
+    stored_key_path.write_text("sk-stored\n")
+    monkeypatch.setenv("SEVENTEENTRACK_KEY", "env-key")
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/getquota", payload=load_fixture("getquota"))
+        result = runner.invoke(app, ["quota"])
+        headers = mocked.requests[("POST", URL(f"{_BASE}/getquota"))][0].kwargs["headers"]
+    assert result.exit_code == 0
+    assert headers["17token"] == "env-key"
+
+
+def test_auth_status_without_any_key_exits_1() -> None:
+    result = runner.invoke(app, ["auth", "status"])
+    assert result.exit_code == 1
+    assert "auth login" in result.stderr
+
+
+def test_auth_status_masks_the_stored_key(stored_key_path: Path) -> None:
+    stored_key_path.parent.mkdir(parents=True)
+    stored_key_path.write_text("0123456789abcdef\n")
+    result = runner.invoke(app, ["auth", "status"])
+    assert result.exit_code == 0
+    assert "0123456789abcdef" not in result.stdout
+    assert "0123…cdef" in result.stdout
+    assert str(stored_key_path) in result.stdout
+
+
+def test_auth_status_json_reports_the_source(
+    monkeypatch: pytest.MonkeyPatch, stored_key_path: Path
+) -> None:
+    stored_key_path.parent.mkdir(parents=True)
+    stored_key_path.write_text("sk-stored\n")
+    monkeypatch.setenv("SEVENTEENTRACK_KEY", "env-key")
+    result = runner.invoke(app, ["auth", "status", "--json"])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout) == {
+        "source": "environment",
+        "environment": True,
+        "stored": True,
+        "path": str(stored_key_path),
+    }
+
+
+def test_auth_logout_removes_the_stored_key(stored_key_path: Path) -> None:
+    stored_key_path.parent.mkdir(parents=True)
+    stored_key_path.write_text("sk-stored\n")
+    result = runner.invoke(app, ["auth", "logout"])
+    assert result.exit_code == 0
+    assert not stored_key_path.exists()
+
+    again = runner.invoke(app, ["auth", "logout"])  # idempotent
+    assert again.exit_code == 0
+    assert "no stored key" in again.stdout
+
+
+def test_stored_key_path_lives_in_the_app_dir() -> None:
+    expected = Path(typer.get_app_dir("aio17track")) / "api-key"
+    assert _real_stored_key_path() == expected
 
 
 # --- quota / info / register ---

@@ -3,8 +3,10 @@
 Typer-based, shipped as the optional ``cli`` extra:
 ``pip install "aio17track[cli]"``. A thin layer over the public API: parse
 arguments, make the call, print. Human-readable lines by default; ``--json``
-emits machine-readable output. The API key comes from ``--key`` or the
-``SEVENTEENTRACK_KEY`` environment variable.
+emits machine-readable output. The API key comes from ``--key``, the
+``SEVENTEENTRACK_KEY`` environment variable, or — after a one-time
+``aio17track auth login`` — the key stored in the per-user app directory,
+in that order of precedence.
 
 Exit codes: 0 success, 1 API/signature/lookup failure, 2 usage error.
 """
@@ -12,6 +14,7 @@ Exit codes: 0 success, 1 API/signature/lookup failure, 2 usage error.
 import asyncio
 import dataclasses
 import json
+import os
 import sys
 import time
 from collections.abc import Callable, Coroutine
@@ -58,6 +61,12 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+auth_app = typer.Typer(
+    help="Manage the stored API key (login once, then no --key needed).",
+    no_args_is_help=True,
+)
+app.add_typer(auth_app, name="auth")
+
 # --- shared parameter declarations ---
 
 _KeyOption = Annotated[
@@ -91,11 +100,34 @@ class _PackageStatusChoice(StrEnum):
     EXCEPTION = "Exception"
 
 
+def _stored_key_path() -> Path:
+    return Path(typer.get_app_dir("aio17track")) / "api-key"
+
+
+def _read_stored_key() -> str | None:
+    """Best-effort read of the key saved by ``auth login``."""
+    try:
+        stored = _stored_key_path().read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    return stored or None
+
+
+def _mask_key(value: str) -> str:
+    if len(value) <= 8:
+        return "*" * len(value)
+    return f"{value[:4]}…{value[-4:]}"
+
+
 def _require_key(key: str | None) -> str:
-    if key:
+    if key:  # --key flag or the environment variable (typer merges both)
         return key
+    stored = _read_stored_key()
+    if stored:
+        return stored
     typer.echo(
-        f"error: no API key: pass --key or set {_KEY_ENV_VAR} in the environment",
+        "error: no API key: run `aio17track auth login`, pass --key, "
+        f"or set {_KEY_ENV_VAR} in the environment",
         err=True,
     )
     raise typer.Exit(2)
@@ -208,6 +240,86 @@ def _read_body(path: str) -> bytes:
     except OSError as exc:
         typer.echo(f"error: {exc}", err=True)
         raise typer.Exit(2) from exc
+
+
+# --- auth ---
+
+
+@auth_app.command("login")
+def auth_login(
+    key: Annotated[
+        str | None,
+        typer.Option("--key", help="API key to store (prompted securely if omitted)"),
+    ] = None,
+) -> None:
+    """Verify an API key against the API and store it for future runs."""
+    candidate = (key or typer.prompt("17TRACK API key", hide_input=True)).strip()
+    if not candidate:
+        typer.echo("error: empty key", err=True)
+        raise typer.Exit(2)
+
+    async def call() -> Any:
+        async with Track17Client(candidate) as client:
+            return await client.get_quota()
+
+    quota_result = _run(call())  # a rejected key exits 1 here, before anything is stored
+
+    path = _stored_key_path()
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(candidate + "\n", encoding="utf-8")
+        path.chmod(0o600)
+    except OSError as exc:
+        typer.echo(f"error: could not store the key: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    print(f"key verified (remaining={quota_result.remaining} credits), saved to {path}")
+
+
+@auth_app.command("status")
+def auth_status(as_json: _JsonOption = False) -> None:
+    """Show which API key the CLI would use and where it comes from."""
+    env_key = os.environ.get(_KEY_ENV_VAR) or None
+    stored_key = _read_stored_key()
+    source = "environment" if env_key else ("stored" if stored_key else None)
+    if as_json:
+        _emit_json(
+            {
+                "source": source,
+                "environment": env_key is not None,
+                "stored": stored_key is not None,
+                "path": str(_stored_key_path()),
+            }
+        )
+        if source is None:
+            raise typer.Exit(1)
+        return
+    if source is None:
+        typer.echo(
+            f"no API key configured: run `aio17track auth login` or set {_KEY_ENV_VAR}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    active = env_key or stored_key
+    assert active is not None
+    origin = f"${_KEY_ENV_VAR}" if env_key else _stored_key_path()
+    print(f"key {_mask_key(active)} from {origin}")
+    if env_key and stored_key:
+        print(f"(a stored key also exists at {_stored_key_path()}; the environment wins)")
+
+
+@auth_app.command("logout")
+def auth_logout() -> None:
+    """Delete the stored API key."""
+    path = _stored_key_path()
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        print("no stored key")
+        return
+    except OSError as exc:
+        typer.echo(f"error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    print(f"removed {path}")
 
 
 # --- commands ---
