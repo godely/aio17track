@@ -13,6 +13,7 @@ import asyncio
 import dataclasses
 import json
 import sys
+import time
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from enum import Enum, StrEnum
@@ -46,6 +47,10 @@ from .models import (
 from .webhook import parse_event, verify_signature
 
 _KEY_ENV_VAR = "SEVENTEENTRACK_KEY"
+
+# The carrier list changes rarely; a week-old copy is fresh enough for
+# name/code lookups, and --refresh exists for anyone who can't wait.
+_CARRIER_CACHE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 
 app = typer.Typer(
     name="aio17track",
@@ -181,6 +186,18 @@ def _print_batch[T](
             f"rejected: {rejected.number}  [{int(rejected.error_code)}] "
             f"{rejected.error_code.name}: {rejected.error_message}"
         )
+
+
+def _default_carrier_cache_path() -> Path:
+    return Path(typer.get_app_dir("aio17track")) / "carriers.json"
+
+
+def _carrier_cache_is_stale(path: Path) -> bool:
+    try:
+        age = time.time() - path.stat().st_mtime
+    except FileNotFoundError:
+        return False
+    return age > _CARRIER_CACHE_MAX_AGE_SECONDS
 
 
 def _read_body(path: str) -> bytes:
@@ -433,19 +450,44 @@ def carriers(
     name: Annotated[
         str | None, typer.Option("--name", help="look up the code for a carrier name")
     ] = None,
+    refresh: Annotated[
+        bool,
+        typer.Option("--refresh", help="discard the cached carrier list and fetch a fresh copy"),
+    ] = False,
     cache: Annotated[
-        Path | None, typer.Option("--cache", help="on-disk cache path for the carrier list")
+        Path | None,
+        typer.Option(
+            "--cache",
+            hidden=True,
+            help="(deprecated) override the carrier-list cache path",
+        ),
     ] = None,
     as_json: _JsonOption = False,
 ) -> None:
-    """Search the carrier catalog."""
+    """Search the carrier catalog.
+
+    The carrier list is cached in the aio17track app directory and
+    refetched automatically once the copy is older than 7 days.
+    """
     if search is None and code is None and name is None:
         # Refuse to dump the multi-thousand-row catalog by accident.
         typer.echo("error: carriers requires one of --search, --code, or --name", err=True)
         raise typer.Exit(2)
+    if cache is not None:
+        typer.echo(
+            "warning: --cache is deprecated; the carrier list is cached automatically "
+            "(use --refresh to force a fresh fetch)",
+            err=True,
+        )
 
     async def call() -> CarrierCatalog:
-        catalog = CarrierCatalog(cache_path=cache)
+        cache_path = cache
+        if cache_path is None:
+            cache_path = _default_carrier_cache_path()
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+        if refresh or _carrier_cache_is_stale(cache_path):
+            cache_path.unlink(missing_ok=True)
+        catalog = CarrierCatalog(cache_path=cache_path)
         async with aiohttp.ClientSession() as session:
             await catalog.load(session)
         return catalog

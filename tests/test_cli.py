@@ -7,18 +7,26 @@ passed in.
 
 import hashlib
 import json
+import os
+import time
 from pathlib import Path
 from typing import Any
 
 import pytest
+import typer
 from aioresponses import CallbackResult, aioresponses
 from typer.testing import CliRunner
 from yarl import URL
 
+from aio17track import cli
 from aio17track.carriers import _CARRIER_LIST_URL
 from aio17track.cli import app
 
 _BASE = "https://api.17track.net/track/v2.4"
+
+# Captured before the autouse fixture below patches it, so the real
+# app-dir derivation stays testable.
+_real_default_carrier_cache_path = cli._default_carrier_cache_path
 
 runner = CliRunner()
 
@@ -36,6 +44,15 @@ def _sent_json(mocked: aioresponses, endpoint: str, index: int = 0) -> Any:
 @pytest.fixture(autouse=True)
 def _no_ambient_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SEVENTEENTRACK_KEY", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def default_cache_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the carriers default cache into tmp_path so no test ever
+    touches the real per-user app directory."""
+    path = tmp_path / "app-dir" / "carriers.json"
+    monkeypatch.setattr(cli, "_default_carrier_cache_path", lambda: path)
+    return path
 
 
 # --- key resolution / usage errors ---
@@ -215,14 +232,15 @@ def test_change_info_requires_tag() -> None:
 
 # --- carriers ---
 
+_CARRIER_SAMPLE = [
+    {"key": 2151, "_name": "Correios"},
+    {"key": 190012, "_name": "Yanwen"},
+]
+
 
 def test_carriers_search() -> None:
-    sample = [
-        {"key": 2151, "_name": "Correios"},
-        {"key": 190012, "_name": "Yanwen"},
-    ]
     with aioresponses() as mocked:
-        mocked.get(_CARRIER_LIST_URL, payload=sample)
+        mocked.get(_CARRIER_LIST_URL, payload=_CARRIER_SAMPLE)
         result = runner.invoke(app, ["carriers", "--search", "corr"])
     assert result.exit_code == 0
     assert "2151\tCorreios" in result.stdout
@@ -234,6 +252,73 @@ def test_carriers_unknown_code_exits_1() -> None:
         result = runner.invoke(app, ["carriers", "--code", "424242"])
     assert result.exit_code == 1
     assert "no carrier" in result.stderr
+
+
+def test_carriers_caches_by_default(default_cache_path: Path) -> None:
+    """The first run creates the app-dir cache; the second is served from it
+    without touching the network."""
+    with aioresponses() as mocked:
+        mocked.get(_CARRIER_LIST_URL, payload=_CARRIER_SAMPLE)
+        first = runner.invoke(app, ["carriers", "--search", "corr"])
+        second = runner.invoke(app, ["carriers", "--search", "corr"])
+        fetches = mocked.requests.get(("GET", URL(_CARRIER_LIST_URL)), [])
+    assert first.exit_code == 0
+    assert second.exit_code == 0
+    assert "2151\tCorreios" in second.stdout
+    assert len(fetches) == 1
+    assert json.loads(default_cache_path.read_text()) == _CARRIER_SAMPLE
+
+
+def test_carriers_fresh_cache_skips_the_fetch(default_cache_path: Path) -> None:
+    default_cache_path.parent.mkdir(parents=True)
+    default_cache_path.write_text(json.dumps(_CARRIER_SAMPLE))
+    with aioresponses() as mocked:  # no GET registered: any fetch would fail
+        result = runner.invoke(app, ["carriers", "--code", "2151"])
+        assert not mocked.requests
+    assert result.exit_code == 0
+    assert "Correios" in result.stdout
+
+
+def test_carriers_stale_cache_is_refetched(default_cache_path: Path) -> None:
+    """A cache older than 7 days is discarded and replaced by a fresh fetch."""
+    default_cache_path.parent.mkdir(parents=True)
+    default_cache_path.write_text(json.dumps([{"key": 2151, "_name": "Stale Name"}]))
+    week_ago = time.time() - 8 * 24 * 60 * 60
+    os.utime(default_cache_path, (week_ago, week_ago))
+    with aioresponses() as mocked:
+        mocked.get(_CARRIER_LIST_URL, payload=_CARRIER_SAMPLE)
+        result = runner.invoke(app, ["carriers", "--code", "2151"])
+    assert result.exit_code == 0
+    assert "Correios" in result.stdout
+    assert json.loads(default_cache_path.read_text()) == _CARRIER_SAMPLE
+
+
+def test_carriers_refresh_forces_a_fetch(default_cache_path: Path) -> None:
+    """--refresh bypasses a perfectly fresh cache."""
+    default_cache_path.parent.mkdir(parents=True)
+    default_cache_path.write_text(json.dumps([{"key": 2151, "_name": "Old Name"}]))
+    with aioresponses() as mocked:
+        mocked.get(_CARRIER_LIST_URL, payload=_CARRIER_SAMPLE)
+        result = runner.invoke(app, ["carriers", "--code", "2151", "--refresh"])
+    assert result.exit_code == 0
+    assert "Correios" in result.stdout
+    assert json.loads(default_cache_path.read_text()) == _CARRIER_SAMPLE
+
+
+def test_carriers_default_cache_path_lives_in_the_app_dir() -> None:
+    expected = Path(typer.get_app_dir("aio17track")) / "carriers.json"
+    assert _real_default_carrier_cache_path() == expected
+
+
+def test_carriers_cache_override_is_deprecated(tmp_path: Path) -> None:
+    """--cache still works (shipped in the Typer rework) but warns."""
+    override = tmp_path / "override.json"
+    with aioresponses() as mocked:
+        mocked.get(_CARRIER_LIST_URL, payload=_CARRIER_SAMPLE)
+        result = runner.invoke(app, ["carriers", "--search", "corr", "--cache", str(override)])
+    assert result.exit_code == 0
+    assert "deprecated" in result.stderr
+    assert json.loads(override.read_text()) == _CARRIER_SAMPLE
 
 
 def test_carriers_unusable_cache_path_is_a_usage_error(tmp_path: Path) -> None:
