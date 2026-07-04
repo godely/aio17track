@@ -121,6 +121,21 @@ def test_auth_login_prompts_when_key_omitted(
     assert "sk-typed" not in result.stdout  # hidden input never echoes
 
 
+def test_auth_login_tightens_a_preexisting_loose_key_file(
+    stored_key_path: Path, load_fixture: Any
+) -> None:
+    """Re-login over a key file with loose permissions must end at 0600."""
+    stored_key_path.parent.mkdir(parents=True)
+    stored_key_path.write_text("sk-old\n")
+    stored_key_path.chmod(0o644)
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/getquota", payload=load_fixture("getquota"))
+        result = runner.invoke(app, ["auth", "login", "--key", "sk-fresh"])
+    assert result.exit_code == 0
+    assert stored_key_path.read_text() == "sk-fresh\n"
+    assert stored_key_path.stat().st_mode & 0o777 == 0o600
+
+
 def test_auth_login_rejected_key_is_not_stored(stored_key_path: Path) -> None:
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/getquota", status=401)

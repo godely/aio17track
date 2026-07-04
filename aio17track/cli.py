@@ -267,7 +267,12 @@ def auth_login(
     path = _stored_key_path()
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(candidate + "\n", encoding="utf-8")
+        # Created 0600 from the first byte; a write-then-chmod would leave a
+        # umask-wide window. The chmod covers a pre-existing file, where
+        # O_CREAT's mode does not apply.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(candidate + "\n")
         path.chmod(0o600)
     except OSError as exc:
         typer.echo(f"error: could not store the key: {exc}", err=True)
