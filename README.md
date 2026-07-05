@@ -93,8 +93,9 @@ fresh = await client.get_realtime_track_info(
 ## CLI
 
 Every client and carrier operation above is also drivable with no code
-(webhook verification is the exception — that belongs in the server
-receiving the pushes, via the library functions). The CLI is
+(two exceptions, both library-only: webhook verification, which belongs
+in the server receiving the pushes, and metered realtime lookups — a
+deliberate scope cut for the first release). The CLI is
 [Typer](https://typer.tiangolo.com/)-based and ships as an optional extra,
 so the base library keeps `aiohttp` as its only runtime dependency:
 
@@ -115,12 +116,11 @@ aio17track auth logout    # delete the stored key
 
 aio17track quota
 aio17track register RR123456789BR --carrier 2151 --tag my-order
-aio17track info RR123456789BR --events
+aio17track status RR123456789BR      # latest tracking status only
+aio17track events RR123456789BR      # full event history
 aio17track list --tracking-status Tracking
 aio17track delete RR123456789BR
 aio17track carriers --search correios
-aio17track realtime RR123456789BR --carrier 2151   # 1 credit
-# --instant deducts 10 credits per number — deliberate flag, never default
 ```
 
 Add `--json` after any subcommand for machine-readable output. Exit codes:

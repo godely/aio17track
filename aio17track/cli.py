@@ -10,7 +10,9 @@ in that order of precedence.
 
 Webhook handling (signature verification, event parsing) is deliberately
 not exposed here — it belongs in the server receiving the pushes; import
-``aio17track.verify_signature`` / ``parse_event`` there instead.
+``aio17track.verify_signature`` / ``parse_event`` there instead. Metered
+realtime lookups (``get_realtime_track_info``) are also library-only for
+now — a deliberate scope cut for the first release, not a permanent one.
 
 Exit codes: 0 success, 1 API/lookup failure, 2 usage error.
 """
@@ -24,7 +26,7 @@ from collections.abc import Callable, Coroutine
 from datetime import datetime
 from enum import Enum, StrEnum
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 try:
     import typer
@@ -38,7 +40,7 @@ import aiohttp
 
 from .carriers import CarrierCatalog
 from .client import Track17Client
-from .enums import CacheLevel, MainStatus, TrackingStatus
+from .enums import MainStatus, TrackingStatus
 from .errors import Track17Error
 from .models import (
     BatchResult,
@@ -84,9 +86,6 @@ _CarrierOption = Annotated[
     typer.Option(
         "--carrier", help="force the carrier when auto-detection is wrong or ambiguous"
     ),
-]
-_EventsOption = Annotated[
-    bool, typer.Option("--events", help="print the full event history")
 ]
 _NumbersArgument = Annotated[list[str], typer.Argument(help="tracking numbers")]
 
@@ -380,14 +379,7 @@ def register(
     _print_batch(as_json, _run(call()), _format_registered)
 
 
-@app.command()
-def info(
-    numbers: _NumbersArgument,
-    key: _KeyOption = None,
-    as_json: _JsonOption = False,
-    events: _EventsOption = False,
-) -> None:
-    """Get tracking info for registered numbers."""
+def _fetch_track_info(numbers: list[str], key: str | None) -> BatchResult[TrackInfo]:
     api_key = _require_key(key)
     items = [NumberCarrier(number) for number in numbers]
 
@@ -395,34 +387,37 @@ def info(
         async with Track17Client(api_key) as client:
             return await client.get_track_info(items)
 
-    _print_batch(as_json, _run(call()), lambda item: _format_track_info(item, events=events))
+    return _run(call())
 
 
 @app.command()
-def realtime(
+def status(
     numbers: _NumbersArgument,
     key: _KeyOption = None,
     as_json: _JsonOption = False,
-    carrier: _CarrierOption = None,
-    events: _EventsOption = False,
-    instant: Annotated[
-        bool,
-        typer.Option(
-            "--instant",
-            help="INSTANT cache level: fresh carrier fetch, DEDUCTS 10 CREDITS PER NUMBER",
-        ),
-    ] = False,
 ) -> None:
-    """Metered realtime lookup (1 credit per number; 10 with --instant)."""
-    api_key = _require_key(key)
-    items = [NumberCarrier(number, carrier=carrier) for number in numbers]
-    cache_level = CacheLevel.INSTANT if instant else CacheLevel.STANDARD
+    """Show the latest tracking status of registered numbers."""
+    result = _fetch_track_info(numbers, key)
+    if as_json:
+        # Latest state only, by definition: strip the history that the API
+        # returns alongside it. `events` shows everything.
+        payload = cast(dict[str, Any], _jsonable(result))
+        for item in payload["accepted"]:
+            item.pop("events", None)
+        _emit_json(payload)
+        return
+    _print_batch(False, result, _format_track_info)
 
-    async def call() -> BatchResult[TrackInfo]:
-        async with Track17Client(api_key) as client:
-            return await client.get_realtime_track_info(items, cache_level=cache_level)
 
-    _print_batch(as_json, _run(call()), lambda item: _format_track_info(item, events=events))
+@app.command()
+def events(
+    numbers: _NumbersArgument,
+    key: _KeyOption = None,
+    as_json: _JsonOption = False,
+) -> None:
+    """Show the full tracking event history of registered numbers."""
+    result = _fetch_track_info(numbers, key)
+    _print_batch(as_json, result, lambda item: _format_track_info(item, events=True))
 
 
 @app.command("list")
