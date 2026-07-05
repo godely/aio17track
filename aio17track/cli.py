@@ -540,10 +540,22 @@ def update(
             if carrier is not None:
                 # changecarrier needs carrier_old, but it exists only to
                 # disambiguate, so resolve it from the registration instead
-                # of making the user look it up. Doing the lookup before any
-                # mutation means an ambiguity aborts with nothing changed.
-                listed = await client.get_track_list(number_filter=[number])
-                codes = sorted({item.carrier for item in listed.items if item.number == number})
+                # of making the user look it up. Walk every page of the
+                # filtered listing (as `list` does): a duplicate hiding on a
+                # later page must abort, not mutate the wrong registration.
+                # Doing the lookup before any mutation means an ambiguity
+                # aborts with nothing changed.
+                found: set[int] = set()
+                page_no = 1
+                while True:
+                    page = await client.get_track_list(
+                        number_filter=[number], page_no=page_no
+                    )
+                    found.update(item.carrier for item in page.items if item.number == number)
+                    if page.page_no >= page.page_total:
+                        break
+                    page_no = page.page_no + 1
+                codes = sorted(found)
                 if not codes:
                     typer.echo(f"error: {number} is not registered", err=True)
                     raise typer.Exit(1)

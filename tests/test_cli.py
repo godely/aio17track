@@ -423,6 +423,7 @@ def test_registration_scoped_commands_reject_carrier(command: list[str]) -> None
 def test_update_carrier_resolves_the_current_carrier(load_fixture: Any) -> None:
     """--carrier is the new code; the CLI looks up carrier_old itself."""
     payload = load_fixture("gettracklist_page")
+    payload["page"].update(page_total=1, data_total=1)  # single page: no follow-up fetch
     payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
@@ -454,6 +455,7 @@ def test_update_tag_needs_no_lookup() -> None:
 
 def test_update_carrier_and_tag_hits_both_endpoints(load_fixture: Any) -> None:
     payload = load_fixture("gettracklist_page")
+    payload["page"].update(page_total=1, data_total=1)  # single page: no follow-up fetch
     payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
@@ -478,6 +480,7 @@ def test_update_ambiguous_number_aborts_before_mutating(load_fixture: Any) -> No
     """A number registered under several carriers exits 2 listing the codes,
     before either endpoint is touched — even the tag change is withheld."""
     payload = load_fixture("gettracklist_page")
+    payload["page"].update(page_total=1, data_total=2)  # single page: no follow-up fetch
     row = payload["data"]["accepted"][0]
     payload["data"]["accepted"] = [dict(row, carrier=2151), dict(row, carrier=190012)]
     with aioresponses() as mocked:
@@ -493,8 +496,31 @@ def test_update_ambiguous_number_aborts_before_mutating(load_fixture: Any) -> No
     assert "190012" in result.stderr
 
 
+def test_update_carrier_lookup_walks_every_page(load_fixture: Any) -> None:
+    """A duplicate registration on a later listing page still aborts: the
+    lookup pages through the filtered results before trusting a single match."""
+    page_one = load_fixture("gettracklist_page")  # reports page 1/2
+    page_one["data"]["accepted"] = [dict(page_one["data"]["accepted"][0], carrier=2151)]
+    page_two = load_fixture("gettracklist_page")
+    page_two["page"].update(page_no=2)
+    page_two["data"]["accepted"] = [dict(page_two["data"]["accepted"][0], carrier=190012)]
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/gettracklist", payload=page_one)
+        mocked.post(f"{_BASE}/gettracklist", payload=page_two)
+        result = runner.invoke(
+            app, ["update", "AA123456789BR", "--carrier", "100003", "--key", "k"]
+        )
+        lookups = mocked.requests[("POST", URL(f"{_BASE}/gettracklist"))]
+        assert ("POST", URL(f"{_BASE}/changecarrier")) not in mocked.requests
+    assert [call.kwargs["json"]["page_no"] for call in lookups] == [1, 2]
+    assert result.exit_code == 2
+    assert "2151" in result.stderr
+    assert "190012" in result.stderr
+
+
 def test_update_unregistered_number_exits_1(load_fixture: Any) -> None:
     payload = load_fixture("gettracklist_page")
+    payload["page"].update(page_total=1, data_total=0)  # single page: no follow-up fetch
     payload["data"]["accepted"] = []
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
@@ -517,6 +543,7 @@ def test_update_without_fields_is_a_usage_error() -> None:
 
 def test_update_json_reports_one_result_per_field(load_fixture: Any) -> None:
     payload = load_fixture("gettracklist_page")
+    payload["page"].update(page_total=1, data_total=1)  # single page: no follow-up fetch
     payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
