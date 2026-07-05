@@ -237,7 +237,7 @@ def test_info_prints_status_and_events(load_fixture: Any) -> None:
             f"{_BASE}/gettrackinfo", payload=load_fixture("gettrackinfo_correios_2151")
         )
         result = runner.invoke(
-            app, ["info", "AA123456789BR", "--carrier", "2151", "--events", "--key", "k"]
+            app, ["info", "AA123456789BR", "--events", "--key", "k"]
         )
     assert result.exit_code == 0
     assert "accepted: AA123456789BR (carrier 2151)  Delivered / Delivered_Other" in result.stdout
@@ -355,11 +355,29 @@ def test_cli_choice_enums_match_the_library_tables() -> None:
 def test_delete_prints_accepted() -> None:
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/deletetrack", callback=_echo_accepted)
-        result = runner.invoke(
-            app, ["delete", "AA123456789BR", "--carrier", "2151", "--key", "k"]
-        )
+        result = runner.invoke(app, ["delete", "AA123456789BR", "--key", "k"])
+        sent = _sent_json(mocked, "deletetrack")
     assert result.exit_code == 0
-    assert "accepted: AA123456789BR (carrier 2151)" in result.stdout
+    assert sent == [{"number": "AA123456789BR"}]  # the account resolves the carrier
+    assert "accepted: AA123456789BR" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["info", "AA123456789BR"],
+        ["stop", "AA123456789BR"],
+        ["retrack", "AA123456789BR"],
+        ["delete", "AA123456789BR"],
+        ["change-info", "AA123456789BR", "--tag", "t"],
+    ],
+)
+def test_registration_scoped_commands_reject_carrier(command: list[str]) -> None:
+    """--carrier stays only where the number alone is ambiguous (register,
+    realtime); on registration-scoped commands it could only be redundant
+    or wrong, so it was removed and must not creep back."""
+    result = runner.invoke(app, [*command, "--carrier", "2151", "--key", "k"])
+    assert result.exit_code == 2
 
 
 def test_change_carrier_payload() -> None:
