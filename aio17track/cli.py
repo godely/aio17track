@@ -76,7 +76,15 @@ _KeyOption = Annotated[
     typer.Option("--key", envvar=_KEY_ENV_VAR, show_envvar=True, help="17token API key"),
 ]
 _JsonOption = Annotated[bool, typer.Option("--json", help="emit JSON output")]
-_CarrierOption = Annotated[int | None, typer.Option("--carrier", help="carrier code")]
+# Only register/realtime take --carrier: there the number alone can be
+# ambiguous to detect. Registration-scoped commands (info, stop, ...) omit
+# it — the account already knows each registration's carrier.
+_CarrierOption = Annotated[
+    int | None,
+    typer.Option(
+        "--carrier", help="force the carrier when auto-detection is wrong or ambiguous"
+    ),
+]
 _EventsOption = Annotated[
     bool, typer.Option("--events", help="print the full event history")
 ]
@@ -377,12 +385,11 @@ def info(
     numbers: _NumbersArgument,
     key: _KeyOption = None,
     as_json: _JsonOption = False,
-    carrier: _CarrierOption = None,
     events: _EventsOption = False,
 ) -> None:
     """Get tracking info for registered numbers."""
     api_key = _require_key(key)
-    items = [NumberCarrier(number, carrier=carrier) for number in numbers]
+    items = [NumberCarrier(number) for number in numbers]
 
     async def call() -> BatchResult[TrackInfo]:
         async with Track17Client(api_key) as client:
@@ -467,12 +474,11 @@ def list_(
 def _lifecycle(
     client_method: str,
     numbers: list[str],
-    carrier: int | None,
     key: str | None,
     as_json: bool,
 ) -> None:
     api_key = _require_key(key)
-    items = [NumberCarrier(number, carrier=carrier) for number in numbers]
+    items = [NumberCarrier(number) for number in numbers]
 
     async def call() -> BatchResult[NumberCarrier]:
         async with Track17Client(api_key) as client:
@@ -488,10 +494,9 @@ def stop(
     numbers: _NumbersArgument,
     key: _KeyOption = None,
     as_json: _JsonOption = False,
-    carrier: _CarrierOption = None,
 ) -> None:
     """Stop tracking numbers."""
-    _lifecycle("stop_track", numbers, carrier, key, as_json)
+    _lifecycle("stop_track", numbers, key, as_json)
 
 
 @app.command()
@@ -499,10 +504,9 @@ def retrack(
     numbers: _NumbersArgument,
     key: _KeyOption = None,
     as_json: _JsonOption = False,
-    carrier: _CarrierOption = None,
 ) -> None:
     """Restart tracking for stopped numbers (once per number)."""
-    _lifecycle("retrack", numbers, carrier, key, as_json)
+    _lifecycle("retrack", numbers, key, as_json)
 
 
 @app.command()
@@ -510,10 +514,9 @@ def delete(
     numbers: _NumbersArgument,
     key: _KeyOption = None,
     as_json: _JsonOption = False,
-    carrier: _CarrierOption = None,
 ) -> None:
     """Delete registrations (frees the slot)."""
-    _lifecycle("delete_track", numbers, carrier, key, as_json)
+    _lifecycle("delete_track", numbers, key, as_json)
 
 
 @app.command("change-carrier")
@@ -564,11 +567,10 @@ def change_info(
     ],
     key: _KeyOption = None,
     as_json: _JsonOption = False,
-    carrier: _CarrierOption = None,
 ) -> None:
     """Change a registration's tag."""
     api_key = _require_key(key)
-    change = InfoChange(number=number, carrier=carrier, tag=tag)
+    change = InfoChange(number=number, carrier=None, tag=tag)
 
     async def call() -> BatchResult[NumberCarrier]:
         async with Track17Client(api_key) as client:

@@ -115,7 +115,7 @@ aio17track auth logout    # delete the stored key
 
 aio17track quota
 aio17track register RR123456789BR --carrier 2151 --tag my-order
-aio17track info RR123456789BR --carrier 2151 --events
+aio17track info RR123456789BR --events
 aio17track list --tracking-status Tracking
 aio17track delete RR123456789BR
 aio17track carriers --search correios
