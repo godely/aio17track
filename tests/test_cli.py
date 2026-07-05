@@ -5,7 +5,6 @@ nothing here touches the network or requires a key beyond the fake one
 passed in.
 """
 
-import hashlib
 import json
 import os
 import time
@@ -586,52 +585,13 @@ def test_carriers_without_flags_is_a_usage_error() -> None:
     assert "--search" in result.stderr
 
 
-# --- webhook ---
+# --- webhook helpers stay library-only ---
 
 
-def test_webhook_verify_and_parse(tmp_path: Path) -> None:
-    body = (Path(__file__).parent / "fixtures" / "webhook_tracking_stopped.json").read_bytes()
-    body_file = tmp_path / "body.json"
-    body_file.write_bytes(body)
-    sign = hashlib.sha256(body + b"/my-key").hexdigest()
-
-    good = ["webhook-verify", "--sign", sign, "--body", str(body_file), "--key", "my-key"]
-    result = runner.invoke(app, good)
-    assert result.exit_code == 0
-    assert "signature ok" in result.stdout
-
-    bad = ["webhook-verify", "--sign", "0" * 64, "--body", str(body_file), "--key", "my-key"]
-    result = runner.invoke(app, bad)
-    assert result.exit_code == 1
-    assert "INVALID" in result.stderr
-
-    result = runner.invoke(app, ["webhook-parse", "--body", str(body_file)])
-    assert result.exit_code == 0
-    assert "TRACKING_STOPPED" in result.stdout
-    assert "AA123456789BR (carrier 2151)" in result.stdout
-
-
-def test_webhook_verify_json_output(tmp_path: Path) -> None:
-    """--json holds for webhook-verify too: {"valid": bool}, same exit codes."""
-    body = b'{"event":"TRACKING_STOPPED","data":{"number":"X","carrier":1}}'
-    body_file = tmp_path / "body.json"
-    body_file.write_bytes(body)
-    sign = hashlib.sha256(body + b"/my-key").hexdigest()
-
-    good = ["webhook-verify", "--sign", sign, "--body", str(body_file), "--key", "my-key"]
-    result = runner.invoke(app, [*good, "--json"])
-    assert result.exit_code == 0
-    assert json.loads(result.stdout) == {"valid": True}
-
-    bad = ["webhook-verify", "--sign", "0" * 64, "--body", str(body_file), "--key", "my-key"]
-    result = runner.invoke(app, [*bad, "--json"])
-    assert result.exit_code == 1
-    assert json.loads(result.stdout) == {"valid": False}
-
-
-def test_webhook_parse_malformed_body_exits_1(tmp_path: Path) -> None:
-    body_file = tmp_path / "bad.json"
-    body_file.write_text("not json")
-    result = runner.invoke(app, ["webhook-parse", "--body", str(body_file)])
-    assert result.exit_code == 1
-    assert "error:" in result.stderr
+def test_webhook_commands_are_not_exposed() -> None:
+    """Webhook verification/parsing belongs in the receiving server, not a
+    human CLI; the commands were removed on purpose and must not creep back."""
+    help_result = runner.invoke(app, ["--help"])
+    assert "webhook" not in help_result.stdout.casefold()
+    assert runner.invoke(app, ["webhook-verify"]).exit_code == 2
+    assert runner.invoke(app, ["webhook-parse"]).exit_code == 2
