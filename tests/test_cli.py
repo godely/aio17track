@@ -230,17 +230,54 @@ def test_quota_json_output(load_fixture: Any) -> None:
     assert json.loads(result.stdout) == {"remaining": 1098, "used": 2, "total": 1100}
 
 
-def test_info_prints_status_and_events(load_fixture: Any) -> None:
+def test_status_prints_latest_only(load_fixture: Any) -> None:
+    """`status` is latest-state by definition — no flag brings the history."""
     with aioresponses() as mocked:
         mocked.post(
             f"{_BASE}/gettrackinfo", payload=load_fixture("gettrackinfo_correios_2151")
         )
-        result = runner.invoke(
-            app, ["info", "AA123456789BR", "--events", "--key", "k"]
-        )
+        result = runner.invoke(app, ["status", "AA123456789BR", "--key", "k"])
     assert result.exit_code == 0
     assert "accepted: AA123456789BR (carrier 2151)  Delivered / Delivered_Other" in result.stdout
-    assert "Objeto postado" in result.stdout  # full history requested
+    assert "latest:" in result.stdout
+    assert "Objeto postado" not in result.stdout  # history stays out
+
+
+def test_events_prints_full_history(load_fixture: Any) -> None:
+    with aioresponses() as mocked:
+        mocked.post(
+            f"{_BASE}/gettrackinfo", payload=load_fixture("gettrackinfo_correios_2151")
+        )
+        result = runner.invoke(app, ["events", "AA123456789BR", "--key", "k"])
+    assert result.exit_code == 0
+    assert "accepted: AA123456789BR (carrier 2151)  Delivered / Delivered_Other" in result.stdout
+    assert "Objeto postado" in result.stdout
+
+
+def test_status_json_omits_events(load_fixture: Any) -> None:
+    """The JSON must agree with the human output about what `status` means."""
+    with aioresponses() as mocked:
+        mocked.post(
+            f"{_BASE}/gettrackinfo", payload=load_fixture("gettrackinfo_correios_2151")
+        )
+        result = runner.invoke(app, ["status", "AA123456789BR", "--key", "k", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["accepted"], "fixture must yield an accepted item"
+    for item in payload["accepted"]:
+        assert "events" not in item
+        assert item["latest_event"] is not None
+
+
+def test_events_json_includes_events(load_fixture: Any) -> None:
+    with aioresponses() as mocked:
+        mocked.post(
+            f"{_BASE}/gettrackinfo", payload=load_fixture("gettrackinfo_correios_2151")
+        )
+        result = runner.invoke(app, ["events", "AA123456789BR", "--key", "k", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert all(item["events"] for item in payload["accepted"])
 
 
 def test_register_reports_rejections(load_fixture: Any) -> None:
@@ -273,25 +310,17 @@ def test_api_error_exits_1() -> None:
     assert "error:" in result.stderr
 
 
-# --- realtime guard ---
+# --- removed commands stay removed ---
 
 
-def test_realtime_standard_omits_cache_level() -> None:
-    with aioresponses() as mocked:
-        mocked.post(f"{_BASE}/getRealTimeTrackInfo", callback=_echo_accepted)
-        result = runner.invoke(app, ["realtime", "PKG0", "--carrier", "2151", "--key", "k"])
-        sent = _sent_json(mocked, "getRealTimeTrackInfo")
-    assert result.exit_code == 0
-    assert sent == [{"number": "PKG0", "carrier": 2151}]
-
-
-def test_realtime_instant_requires_explicit_flag() -> None:
-    with aioresponses() as mocked:
-        mocked.post(f"{_BASE}/getRealTimeTrackInfo", callback=_echo_accepted)
-        result = runner.invoke(app, ["realtime", "PKG0", "--instant", "--key", "k"])
-        sent = _sent_json(mocked, "getRealTimeTrackInfo")
-    assert result.exit_code == 0
-    assert sent == [{"number": "PKG0", "cacheLevel": "Instant"}]
+def test_info_and_realtime_are_not_exposed() -> None:
+    """`info` was split into `status`/`events`; `realtime` (the metered,
+    freemium-tier lookup) is library-only until a post-release decision.
+    Neither may creep back."""
+    help_result = runner.invoke(app, ["--help"])
+    assert "realtime" not in help_result.stdout
+    assert runner.invoke(app, ["info", "AA123456789BR", "--key", "k"]).exit_code == 2
+    assert runner.invoke(app, ["realtime", "AA123456789BR", "--key", "k"]).exit_code == 2
 
 
 # --- list ---
@@ -364,7 +393,8 @@ def test_delete_prints_accepted() -> None:
 @pytest.mark.parametrize(
     "command",
     [
-        ["info", "AA123456789BR"],
+        ["status", "AA123456789BR"],
+        ["events", "AA123456789BR"],
         ["stop", "AA123456789BR"],
         ["retrack", "AA123456789BR"],
         ["delete", "AA123456789BR"],
