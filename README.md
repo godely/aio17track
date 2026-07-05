@@ -117,7 +117,6 @@ aio17track info RR123456789BR --carrier 2151 --events
 aio17track list --tracking-status Tracking
 aio17track delete RR123456789BR
 aio17track carriers --search correios
-aio17track webhook-verify --sign "$SIGN_HEADER" --body body.json
 aio17track realtime RR123456789BR --carrier 2151   # 1 credit
 # --instant deducts 10 credits per number — deliberate flag, never default
 ```

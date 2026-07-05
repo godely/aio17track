@@ -8,14 +8,17 @@ emits machine-readable output. The API key comes from ``--key``, the
 ``aio17track auth login`` — the key stored in the per-user app directory,
 in that order of precedence.
 
-Exit codes: 0 success, 1 API/signature/lookup failure, 2 usage error.
+Webhook handling (signature verification, event parsing) is deliberately
+not exposed here — it belongs in the server receiving the pushes; import
+``aio17track.verify_signature`` / ``parse_event`` there instead.
+
+Exit codes: 0 success, 1 API/lookup failure, 2 usage error.
 """
 
 import asyncio
 import dataclasses
 import json
 import os
-import sys
 import time
 from collections.abc import Callable, Coroutine
 from datetime import datetime
@@ -36,7 +39,7 @@ import aiohttp
 from .carriers import CarrierCatalog
 from .client import Track17Client
 from .enums import CacheLevel, MainStatus, TrackingStatus
-from .errors import SignatureError, Track17Error
+from .errors import Track17Error
 from .models import (
     BatchResult,
     CarrierChange,
@@ -47,7 +50,6 @@ from .models import (
     TrackInfo,
     TrackRegistration,
 )
-from .webhook import parse_event, verify_signature
 
 _KEY_ENV_VAR = "SEVENTEENTRACK_KEY"
 
@@ -230,16 +232,6 @@ def _carrier_cache_is_stale(path: Path) -> bool:
     except FileNotFoundError:
         return False
     return age > _CARRIER_CACHE_MAX_AGE_SECONDS
-
-
-def _read_body(path: str) -> bytes:
-    if path == "-":
-        return sys.stdin.buffer.read()
-    try:
-        return Path(path).read_bytes()
-    except OSError as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(2) from exc
 
 
 # --- auth ---
@@ -682,57 +674,6 @@ def carriers(
     if not matches:
         typer.echo(f"no carriers matching {search!r}", err=True)
         raise typer.Exit(1)
-
-
-@app.command("webhook-verify")
-def webhook_verify(
-    sign: Annotated[str, typer.Option("--sign", help="value of the webhook's sign header")],
-    body: Annotated[
-        str, typer.Option("--body", help="path to the raw body ('-' for stdin)")
-    ] = "-",
-    key: _KeyOption = None,
-    as_json: _JsonOption = False,
-) -> None:
-    """Verify a webhook signature over the raw body bytes."""
-    api_key = _require_key(key)
-    raw = _read_body(body)
-    try:
-        verify_signature(raw, sign, api_key)
-    except SignatureError:
-        if as_json:
-            _emit_json({"valid": False})
-        else:
-            typer.echo("signature INVALID", err=True)
-        raise typer.Exit(1) from None
-    if as_json:
-        _emit_json({"valid": True})
-    else:
-        print("signature ok")
-
-
-@app.command("webhook-parse")
-def webhook_parse(
-    body: Annotated[
-        str, typer.Option("--body", help="path to the raw body ('-' for stdin)")
-    ] = "-",
-    as_json: _JsonOption = False,
-    events: _EventsOption = False,
-) -> None:
-    """Parse a webhook body into a typed event."""
-    raw = _read_body(body)
-    try:
-        event = parse_event(raw)
-    except Track17Error as exc:
-        typer.echo(f"error: {exc}", err=True)
-        raise typer.Exit(1) from exc
-    if as_json:
-        _emit_json(event)
-        return
-    print(event.event)
-    if isinstance(event.data, TrackInfo):
-        print(_format_track_info(event.data, events=events))
-    else:
-        print(f"{event.data.number} (carrier {event.data.carrier}) tag={event.data.tag or '-'}")
 
 
 def main() -> None:
