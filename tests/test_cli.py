@@ -323,6 +323,18 @@ def test_info_and_realtime_are_not_exposed() -> None:
     assert runner.invoke(app, ["realtime", "AA123456789BR", "--key", "k"]).exit_code == 2
 
 
+def test_change_commands_are_merged_into_update() -> None:
+    """`change-carrier` and `change-info` were merged into `update`;
+    neither may creep back."""
+    help_result = runner.invoke(app, ["--help"])
+    assert "change-carrier" not in help_result.stdout
+    assert "change-info" not in help_result.stdout
+    change_carrier = ["change-carrier", "AA123456789BR", "--new", "190012", "--key", "k"]
+    assert runner.invoke(app, change_carrier).exit_code == 2
+    change_info = ["change-info", "AA123456789BR", "--tag", "t", "--key", "k"]
+    assert runner.invoke(app, change_info).exit_code == 2
+
+
 # --- list ---
 
 
@@ -377,7 +389,7 @@ def test_cli_choice_enums_match_the_library_tables() -> None:
     }
 
 
-# --- lifecycle / change ---
+# --- lifecycle / update ---
 
 
 def test_delete_prints_accepted() -> None:
@@ -398,7 +410,6 @@ def test_delete_prints_accepted() -> None:
         ["stop", "AA123456789BR"],
         ["retrack", "AA123456789BR"],
         ["delete", "AA123456789BR"],
-        ["change-info", "AA123456789BR", "--tag", "t"],
     ],
 )
 def test_registration_scoped_commands_reject_carrier(command: list[str]) -> None:
@@ -409,78 +420,129 @@ def test_registration_scoped_commands_reject_carrier(command: list[str]) -> None
     assert result.exit_code == 2
 
 
-def test_change_carrier_payload() -> None:
-    with aioresponses() as mocked:
-        mocked.post(f"{_BASE}/changecarrier", callback=_echo_accepted)
-        result = runner.invoke(
-            app,
-            [
-                "change-carrier",
-                "AA123456789BR",
-                "--old",
-                "2151",
-                "--new",
-                "190012",
-                "--key",
-                "k",
-            ],
-        )
-        sent = _sent_json(mocked, "changecarrier")
-        assert ("POST", URL(f"{_BASE}/gettracklist")) not in mocked.requests  # no lookup
-    assert result.exit_code == 0
-    assert sent == [{"number": "AA123456789BR", "carrier_old": 2151, "carrier_new": 190012}]
-
-
-def test_change_carrier_resolves_old_carrier_when_omitted(load_fixture: Any) -> None:
-    """Without --old the CLI looks the number up and fills carrier_old itself."""
+def test_update_carrier_resolves_the_current_carrier(load_fixture: Any) -> None:
+    """--carrier is the new code; the CLI looks up carrier_old itself."""
     payload = load_fixture("gettracklist_page")
     payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
         mocked.post(f"{_BASE}/changecarrier", callback=_echo_accepted)
         result = runner.invoke(
-            app, ["change-carrier", "AA123456789BR", "--new", "190012", "--key", "k"]
+            app, ["update", "AA123456789BR", "--carrier", "190012", "--key", "k"]
         )
         looked_up = _sent_json(mocked, "gettracklist")
         sent = _sent_json(mocked, "changecarrier")
+        assert ("POST", URL(f"{_BASE}/changeinfo")) not in mocked.requests  # no tag change
     assert result.exit_code == 0
     assert looked_up == {"page_no": 1, "number": "AA123456789BR"}
     assert sent == [{"number": "AA123456789BR", "carrier_old": 2151, "carrier_new": 190012}]
 
 
-def test_change_carrier_ambiguous_number_needs_explicit_old(load_fixture: Any) -> None:
-    """A number registered under several carriers exits 2, listing the codes."""
+def test_update_tag_needs_no_lookup() -> None:
+    """--tag alone goes straight to changeinfo; the carrier lookup exists
+    only to fill changecarrier's carrier_old."""
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/changeinfo", callback=_echo_accepted)
+        result = runner.invoke(app, ["update", "AA123456789BR", "--tag", "new-tag", "--key", "k"])
+        sent = _sent_json(mocked, "changeinfo")
+        assert ("POST", URL(f"{_BASE}/gettracklist")) not in mocked.requests
+        assert ("POST", URL(f"{_BASE}/changecarrier")) not in mocked.requests
+    assert result.exit_code == 0
+    assert sent == [{"number": "AA123456789BR", "items": {"tag": "new-tag"}}]
+    assert "tag: accepted:" in result.stdout
+
+
+def test_update_carrier_and_tag_hits_both_endpoints(load_fixture: Any) -> None:
+    payload = load_fixture("gettracklist_page")
+    payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/gettracklist", payload=payload)
+        mocked.post(f"{_BASE}/changecarrier", callback=_echo_accepted)
+        mocked.post(f"{_BASE}/changeinfo", callback=_echo_accepted)
+        result = runner.invoke(
+            app,
+            ["update", "AA123456789BR", "--carrier", "190012", "--tag", "t", "--key", "k"],
+        )
+        lookups = mocked.requests[("POST", URL(f"{_BASE}/gettracklist"))]
+        carrier_sent = _sent_json(mocked, "changecarrier")
+        tag_sent = _sent_json(mocked, "changeinfo")
+    assert result.exit_code == 0
+    assert len(lookups) == 1
+    assert carrier_sent == [{"number": "AA123456789BR", "carrier_old": 2151, "carrier_new": 190012}]
+    assert tag_sent == [{"number": "AA123456789BR", "items": {"tag": "t"}}]
+    assert "carrier: accepted:" in result.stdout
+    assert "tag: accepted:" in result.stdout
+
+
+def test_update_ambiguous_number_aborts_before_mutating(load_fixture: Any) -> None:
+    """A number registered under several carriers exits 2 listing the codes,
+    before either endpoint is touched — even the tag change is withheld."""
     payload = load_fixture("gettracklist_page")
     row = payload["data"]["accepted"][0]
     payload["data"]["accepted"] = [dict(row, carrier=2151), dict(row, carrier=190012)]
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
         result = runner.invoke(
-            app, ["change-carrier", "AA123456789BR", "--new", "100003", "--key", "k"]
+            app,
+            ["update", "AA123456789BR", "--carrier", "100003", "--tag", "t", "--key", "k"],
         )
         assert ("POST", URL(f"{_BASE}/changecarrier")) not in mocked.requests
+        assert ("POST", URL(f"{_BASE}/changeinfo")) not in mocked.requests
     assert result.exit_code == 2
-    assert "--old" in result.stderr
     assert "2151" in result.stderr
     assert "190012" in result.stderr
 
 
-def test_change_carrier_unregistered_number_exits_1(load_fixture: Any) -> None:
+def test_update_unregistered_number_exits_1(load_fixture: Any) -> None:
     payload = load_fixture("gettracklist_page")
     payload["data"]["accepted"] = []
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
         result = runner.invoke(
-            app, ["change-carrier", "ZZ000000000XX", "--new", "190012", "--key", "k"]
+            app, ["update", "ZZ000000000XX", "--carrier", "190012", "--key", "k"]
         )
         assert ("POST", URL(f"{_BASE}/changecarrier")) not in mocked.requests
     assert result.exit_code == 1
     assert "not registered" in result.stderr
 
 
-def test_change_info_requires_tag() -> None:
-    result = runner.invoke(app, ["change-info", "AA123456789BR", "--key", "k"])
+def test_update_without_fields_is_a_usage_error() -> None:
+    with aioresponses() as mocked:
+        result = runner.invoke(app, ["update", "AA123456789BR", "--key", "k"])
+        assert not mocked.requests  # rejected before any network
     assert result.exit_code == 2
+    assert "--carrier" in result.stderr
+    assert "--tag" in result.stderr
+
+
+def test_update_json_reports_one_result_per_field(load_fixture: Any) -> None:
+    payload = load_fixture("gettracklist_page")
+    payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
+    with aioresponses() as mocked:
+        mocked.post(f"{_BASE}/gettracklist", payload=payload)
+        mocked.post(f"{_BASE}/changecarrier", callback=_echo_accepted)
+        mocked.post(f"{_BASE}/changeinfo", callback=_echo_accepted)
+        result = runner.invoke(
+            app,
+            [
+                "update",
+                "AA123456789BR",
+                "--carrier",
+                "190012",
+                "--tag",
+                "t",
+                "--key",
+                "k",
+                "--json",
+            ],
+        )
+    assert result.exit_code == 0
+    parsed = json.loads(result.stdout)
+    assert set(parsed) == {"carrier", "tag"}
+    assert [item["number"] for item in parsed["carrier"]["accepted"]] == ["AA123456789BR"]
+    assert [item["number"] for item in parsed["tag"]["accepted"]] == ["AA123456789BR"]
+    assert parsed["carrier"]["rejected"] == []
+    assert parsed["tag"]["rejected"] == []
 
 
 # --- carriers ---
