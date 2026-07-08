@@ -216,17 +216,16 @@ def _format_number_carrier(item: NumberCarrier) -> str:
 
 
 def _print_batch[T](
-    as_json: bool, result: BatchResult[T], describe: Callable[[T], str], *, label: str = ""
+    as_json: bool, result: BatchResult[T], describe: Callable[[T], str]
 ) -> None:
     if as_json:
         _emit_json(result)
         return
-    prefix = f"{label}: " if label else ""
     for item in result.accepted:
-        print(f"{prefix}accepted: {describe(item)}")
+        print(f"accepted: {describe(item)}")
     for rejected in result.rejected:
         print(
-            f"{prefix}rejected: {rejected.number}  [{int(rejected.error_code)}] "
+            f"rejected: {rejected.number}  [{int(rejected.error_code)}] "
             f"{rejected.error_code.name}: {rejected.error_message}"
         )
 
@@ -528,64 +527,49 @@ def update(
     key: _KeyOption = None,
     as_json: _JsonOption = False,
 ) -> None:
-    """Update a registration: reassign its carrier and/or change its tag."""
-    if carrier is None and tag is None:
-        typer.echo("error: update requires at least one of --carrier or --tag", err=True)
+    """Update a registration's carrier or tag."""
+    if (carrier is None) == (tag is None):
+        typer.echo("error: update takes exactly one of --carrier or --tag", err=True)
         raise typer.Exit(2)
     api_key = _require_key(key)
 
-    async def call() -> tuple[BatchResult[NumberCarrier] | None, BatchResult[NumberCarrier] | None]:
+    async def call() -> BatchResult[NumberCarrier]:
         async with Track17Client(api_key) as client:
-            carrier_result: BatchResult[NumberCarrier] | None = None
-            if carrier is not None:
-                # changecarrier needs carrier_old, but it exists only to
-                # disambiguate, so resolve it from the registration instead
-                # of making the user look it up. Walk every page of the
-                # filtered listing (as `list` does): a duplicate hiding on a
-                # later page must abort, not mutate the wrong registration.
-                # Doing the lookup before any mutation means an ambiguity
-                # aborts with nothing changed.
-                found: set[int] = set()
-                page_no = 1
-                while True:
-                    page = await client.get_track_list(
-                        number_filter=[number], page_no=page_no
-                    )
-                    found.update(item.carrier for item in page.items if item.number == number)
-                    if page.page_no >= page.page_total:
-                        break
-                    page_no = page.page_no + 1
-                codes = sorted(found)
-                if not codes:
-                    typer.echo(f"error: {number} is not registered", err=True)
-                    raise typer.Exit(1)
-                if len(codes) > 1:
-                    typer.echo(
-                        f"error: {number} is registered under several carriers "
-                        f"({', '.join(str(code) for code in codes)}); "
-                        "the CLI cannot decide which registration to update",
-                        err=True,
-                    )
-                    raise typer.Exit(2)
-                change = CarrierChange(number=number, carrier_old=codes[0], carrier_new=carrier)
-                carrier_result = await client.change_carrier([change])
-            tag_result: BatchResult[NumberCarrier] | None = None
             if tag is not None:
-                tag_result = await client.change_info(
+                return await client.change_info(
                     [InfoChange(number=number, carrier=None, tag=tag)]
                 )
-            return carrier_result, tag_result
+            # changecarrier needs carrier_old, but it exists only to
+            # disambiguate, so resolve it from the registration instead of
+            # making the user look it up. Walk every page of the filtered
+            # listing (as `list` does) so a duplicate on a later page still
+            # aborts rather than mutating the wrong registration.
+            found: set[int] = set()
+            page_no = 1
+            while True:
+                page = await client.get_track_list(number_filter=[number], page_no=page_no)
+                found.update(item.carrier for item in page.items if item.number == number)
+                if page.page_no >= page.page_total:
+                    break
+                page_no = page.page_no + 1
+            codes = sorted(found)
+            if not codes:
+                typer.echo(f"error: {number} is not registered", err=True)
+                raise typer.Exit(1)
+            if len(codes) > 1:
+                typer.echo(
+                    f"error: {number} is registered under several carriers "
+                    f"({', '.join(str(code) for code in codes)}); "
+                    "the CLI cannot decide which registration to update",
+                    err=True,
+                )
+                raise typer.Exit(2)
+            assert carrier is not None  # guaranteed by the guard above
+            return await client.change_carrier(
+                [CarrierChange(number=number, carrier_old=codes[0], carrier_new=carrier)]
+            )
 
-    # Two separate API endpoints: one can fail while the other succeeds, so
-    # each field reports its own result (partial success is data, exit 0).
-    carrier_result, tag_result = _run(call())
-    if as_json:
-        _emit_json({"carrier": carrier_result, "tag": tag_result})
-        return
-    if carrier_result is not None:
-        _print_batch(False, carrier_result, _format_number_carrier, label="carrier")
-    if tag_result is not None:
-        _print_batch(False, tag_result, _format_number_carrier, label="tag")
+    _print_batch(as_json, _run(call()), _format_number_carrier)
 
 
 @app.command()
