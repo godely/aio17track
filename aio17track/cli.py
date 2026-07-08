@@ -79,8 +79,9 @@ _KeyOption = Annotated[
 ]
 _JsonOption = Annotated[bool, typer.Option("--json", help="emit JSON output")]
 # Only register/realtime take --carrier: there the number alone can be
-# ambiguous to detect. Registration-scoped commands (info, stop, ...) omit
-# it — the account already knows each registration's carrier.
+# ambiguous to detect. Registration-scoped commands (status, stop, ...) omit
+# it — the account already knows each registration's carrier. (`update
+# --carrier` is unrelated: there it names the new carrier being assigned.)
 _CarrierOption = Annotated[
     int | None,
     typer.Option(
@@ -215,16 +216,17 @@ def _format_number_carrier(item: NumberCarrier) -> str:
 
 
 def _print_batch[T](
-    as_json: bool, result: BatchResult[T], describe: Callable[[T], str]
+    as_json: bool, result: BatchResult[T], describe: Callable[[T], str], *, label: str = ""
 ) -> None:
     if as_json:
         _emit_json(result)
         return
+    prefix = f"{label}: " if label else ""
     for item in result.accepted:
-        print(f"accepted: {describe(item)}")
+        print(f"{prefix}accepted: {describe(item)}")
     for rejected in result.rejected:
         print(
-            f"rejected: {rejected.number}  [{int(rejected.error_code)}] "
+            f"{prefix}rejected: {rejected.number}  [{int(rejected.error_code)}] "
             f"{rejected.error_code.name}: {rejected.error_message}"
         )
 
@@ -514,28 +516,46 @@ def delete(
     _lifecycle("delete_track", numbers, key, as_json)
 
 
-@app.command("change-carrier")
-def change_carrier(
+@app.command()
+def update(
     number: Annotated[str, typer.Argument()],
-    new: Annotated[int, typer.Option("--new", help="new carrier code")],
-    old: Annotated[
-        int | None,
-        typer.Option("--old", help="current carrier code (looked up automatically if omitted)"),
+    carrier: Annotated[
+        int | None, typer.Option("--carrier", help="new carrier code")
+    ] = None,
+    tag: Annotated[
+        str | None, typer.Option("--tag", help="new tag (the only info field the API can change)")
     ] = None,
     key: _KeyOption = None,
     as_json: _JsonOption = False,
 ) -> None:
-    """Reassign a number to another carrier."""
+    """Update a registration: reassign its carrier and/or change its tag."""
+    if carrier is None and tag is None:
+        typer.echo("error: update requires at least one of --carrier or --tag", err=True)
+        raise typer.Exit(2)
     api_key = _require_key(key)
 
-    async def call() -> BatchResult[NumberCarrier]:
+    async def call() -> tuple[BatchResult[NumberCarrier] | None, BatchResult[NumberCarrier] | None]:
         async with Track17Client(api_key) as client:
-            carrier_old = old
-            if carrier_old is None:
-                # carrier_old exists only to disambiguate, so resolve it from
-                # the registration instead of making the user look it up.
-                listed = await client.get_track_list(number_filter=[number])
-                codes = sorted({item.carrier for item in listed.items if item.number == number})
+            carrier_result: BatchResult[NumberCarrier] | None = None
+            if carrier is not None:
+                # changecarrier needs carrier_old, but it exists only to
+                # disambiguate, so resolve it from the registration instead
+                # of making the user look it up. Walk every page of the
+                # filtered listing (as `list` does): a duplicate hiding on a
+                # later page must abort, not mutate the wrong registration.
+                # Doing the lookup before any mutation means an ambiguity
+                # aborts with nothing changed.
+                found: set[int] = set()
+                page_no = 1
+                while True:
+                    page = await client.get_track_list(
+                        number_filter=[number], page_no=page_no
+                    )
+                    found.update(item.carrier for item in page.items if item.number == number)
+                    if page.page_no >= page.page_total:
+                        break
+                    page_no = page.page_no + 1
+                codes = sorted(found)
                 if not codes:
                     typer.echo(f"error: {number} is not registered", err=True)
                     raise typer.Exit(1)
@@ -543,35 +563,29 @@ def change_carrier(
                     typer.echo(
                         f"error: {number} is registered under several carriers "
                         f"({', '.join(str(code) for code in codes)}); "
-                        "pass --old to pick one",
+                        "the CLI cannot decide which registration to update",
                         err=True,
                     )
                     raise typer.Exit(2)
-                carrier_old = codes[0]
-            change = CarrierChange(number=number, carrier_old=carrier_old, carrier_new=new)
-            return await client.change_carrier([change])
+                change = CarrierChange(number=number, carrier_old=codes[0], carrier_new=carrier)
+                carrier_result = await client.change_carrier([change])
+            tag_result: BatchResult[NumberCarrier] | None = None
+            if tag is not None:
+                tag_result = await client.change_info(
+                    [InfoChange(number=number, carrier=None, tag=tag)]
+                )
+            return carrier_result, tag_result
 
-    _print_batch(as_json, _run(call()), _format_number_carrier)
-
-
-@app.command("change-info")
-def change_info(
-    number: Annotated[str, typer.Argument()],
-    tag: Annotated[
-        str, typer.Option("--tag", help="new tag (the only field the API can change)")
-    ],
-    key: _KeyOption = None,
-    as_json: _JsonOption = False,
-) -> None:
-    """Change a registration's tag."""
-    api_key = _require_key(key)
-    change = InfoChange(number=number, carrier=None, tag=tag)
-
-    async def call() -> BatchResult[NumberCarrier]:
-        async with Track17Client(api_key) as client:
-            return await client.change_info([change])
-
-    _print_batch(as_json, _run(call()), _format_number_carrier)
+    # Two separate API endpoints: one can fail while the other succeeds, so
+    # each field reports its own result (partial success is data, exit 0).
+    carrier_result, tag_result = _run(call())
+    if as_json:
+        _emit_json({"carrier": carrier_result, "tag": tag_result})
+        return
+    if carrier_result is not None:
+        _print_batch(False, carrier_result, _format_number_carrier, label="carrier")
+    if tag_result is not None:
+        _print_batch(False, tag_result, _format_number_carrier, label="tag")
 
 
 @app.command()
