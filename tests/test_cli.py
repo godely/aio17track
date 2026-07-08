@@ -450,35 +450,12 @@ def test_update_tag_needs_no_lookup() -> None:
         assert ("POST", URL(f"{_BASE}/changecarrier")) not in mocked.requests
     assert result.exit_code == 0
     assert sent == [{"number": "AA123456789BR", "items": {"tag": "new-tag"}}]
-    assert "tag: accepted:" in result.stdout
-
-
-def test_update_carrier_and_tag_hits_both_endpoints(load_fixture: Any) -> None:
-    payload = load_fixture("gettracklist_page")
-    payload["page"].update(page_total=1, data_total=1)  # single page: no follow-up fetch
-    payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
-    with aioresponses() as mocked:
-        mocked.post(f"{_BASE}/gettracklist", payload=payload)
-        mocked.post(f"{_BASE}/changecarrier", callback=_echo_accepted)
-        mocked.post(f"{_BASE}/changeinfo", callback=_echo_accepted)
-        result = runner.invoke(
-            app,
-            ["update", "AA123456789BR", "--carrier", "190012", "--tag", "t", "--key", "k"],
-        )
-        lookups = mocked.requests[("POST", URL(f"{_BASE}/gettracklist"))]
-        carrier_sent = _sent_json(mocked, "changecarrier")
-        tag_sent = _sent_json(mocked, "changeinfo")
-    assert result.exit_code == 0
-    assert len(lookups) == 1
-    assert carrier_sent == [{"number": "AA123456789BR", "carrier_old": 2151, "carrier_new": 190012}]
-    assert tag_sent == [{"number": "AA123456789BR", "items": {"tag": "t"}}]
-    assert "carrier: accepted:" in result.stdout
-    assert "tag: accepted:" in result.stdout
+    assert "accepted: AA123456789BR" in result.stdout
 
 
 def test_update_ambiguous_number_aborts_before_mutating(load_fixture: Any) -> None:
     """A number registered under several carriers exits 2 listing the codes,
-    before either endpoint is touched — even the tag change is withheld."""
+    before changecarrier is touched."""
     payload = load_fixture("gettracklist_page")
     payload["page"].update(page_total=1, data_total=2)  # single page: no follow-up fetch
     row = payload["data"]["accepted"][0]
@@ -486,11 +463,9 @@ def test_update_ambiguous_number_aborts_before_mutating(load_fixture: Any) -> No
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
         result = runner.invoke(
-            app,
-            ["update", "AA123456789BR", "--carrier", "100003", "--tag", "t", "--key", "k"],
+            app, ["update", "AA123456789BR", "--carrier", "100003", "--key", "k"]
         )
         assert ("POST", URL(f"{_BASE}/changecarrier")) not in mocked.requests
-        assert ("POST", URL(f"{_BASE}/changeinfo")) not in mocked.requests
     assert result.exit_code == 2
     assert "2151" in result.stderr
     assert "190012" in result.stderr
@@ -532,44 +507,38 @@ def test_update_unregistered_number_exits_1(load_fixture: Any) -> None:
     assert "not registered" in result.stderr
 
 
-def test_update_without_fields_is_a_usage_error() -> None:
+@pytest.mark.parametrize(
+    "extra",
+    [
+        [],  # neither field
+        ["--carrier", "190012", "--tag", "t"],  # both fields
+    ],
+)
+def test_update_takes_exactly_one_field(extra: list[str]) -> None:
+    """update changes a single field per call: neither and both are usage errors."""
     with aioresponses() as mocked:
-        result = runner.invoke(app, ["update", "AA123456789BR", "--key", "k"])
+        result = runner.invoke(app, ["update", "AA123456789BR", *extra, "--key", "k"])
         assert not mocked.requests  # rejected before any network
     assert result.exit_code == 2
     assert "--carrier" in result.stderr
     assert "--tag" in result.stderr
 
 
-def test_update_json_reports_one_result_per_field(load_fixture: Any) -> None:
+def test_update_json_emits_the_batch_result(load_fixture: Any) -> None:
     payload = load_fixture("gettracklist_page")
     payload["page"].update(page_total=1, data_total=1)  # single page: no follow-up fetch
     payload["data"]["accepted"] = [payload["data"]["accepted"][0]]  # AA... on carrier 2151
     with aioresponses() as mocked:
         mocked.post(f"{_BASE}/gettracklist", payload=payload)
         mocked.post(f"{_BASE}/changecarrier", callback=_echo_accepted)
-        mocked.post(f"{_BASE}/changeinfo", callback=_echo_accepted)
         result = runner.invoke(
             app,
-            [
-                "update",
-                "AA123456789BR",
-                "--carrier",
-                "190012",
-                "--tag",
-                "t",
-                "--key",
-                "k",
-                "--json",
-            ],
+            ["update", "AA123456789BR", "--carrier", "190012", "--key", "k", "--json"],
         )
     assert result.exit_code == 0
     parsed = json.loads(result.stdout)
-    assert set(parsed) == {"carrier", "tag"}
-    assert [item["number"] for item in parsed["carrier"]["accepted"]] == ["AA123456789BR"]
-    assert [item["number"] for item in parsed["tag"]["accepted"]] == ["AA123456789BR"]
-    assert parsed["carrier"]["rejected"] == []
-    assert parsed["tag"]["rejected"] == []
+    assert [item["number"] for item in parsed["accepted"]] == ["AA123456789BR"]
+    assert parsed["rejected"] == []
 
 
 # --- carriers ---
